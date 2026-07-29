@@ -1,12 +1,12 @@
-PROG1     = $(shell jq -r '.acapPackageConf.setup.appName' manifest.json)
-OBJS1     = $(PROG1).c
-PROGS     = $(PROG1)
+PROG      = $(shell jq -r '.acapPackageConf.setup.appName' manifest.json)
+SRCS      = object_dwell_timer.c zone.c tracker.c events.c httpd.c
+OBJS      = $(SRCS:.c=.o)
 DEBUG_DIR = debug
 
-PKGS = device-data-hub-client-c jansson glib-2.0
+PKGS = device-data-hub-client-c jansson glib-2.0 gio-2.0 axevent
 
-CFLAGS  += $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags $(PKGS))
-LDLIBS  += $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs $(PKGS))
+CFLAGS += $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags $(PKGS))
+LDLIBS += $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs $(PKGS)) -lm
 
 CFLAGS += -Wall \
           -Wextra \
@@ -20,13 +20,16 @@ CFLAGS += -Wall \
           -Werror \
           -std=c17
 
-all: $(PROGS)
+all: $(PROG)
 
-$(PROG1): $(OBJS1)
+%.o: %.c
+	$(CC) -c $< $(CFLAGS) -o $@
+
+$(PROG): $(OBJS)
 	install -d $(DEBUG_DIR)
 	$(CC) $^ $(CFLAGS) $(LDFLAGS) $(LDLIBS) -o $(DEBUG_DIR)/$@
 	cp $(DEBUG_DIR)/$@ .
 	$(STRIP) $@
 
 clean:
-	rm -rf $(PROGS) *.o *.eap* *_LICENSE.txt package.conf* param.conf tmp* $(DEBUG_DIR)
+	rm -rf $(PROG) *.o *.eap* *_LICENSE.txt package.conf* param.conf tmp* $(DEBUG_DIR)

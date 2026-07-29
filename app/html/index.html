@@ -10,7 +10,7 @@
 <header>
     <div class="title">
         <h1>Object Dwell Timer</h1>
-        <span class="ver">v0.1.0 &middot; Phase 0 spike</span>
+        <span class="ver">v0.1.0</span>
     </div>
     <div class="live">
         <span id="dot" class="dot"></span>
@@ -18,53 +18,60 @@
     </div>
 </header>
 
-<p class="lede">
-    This build contains no dwell logic yet. It consumes the camera's scene metadata and reports
-    what the hardware actually does, so the real timer is built on measurements rather than
-    assumptions. Figures below are parsed live from the application log.
+<p class="lede" id="lede">
+    Times how long selected object types stay inside a zone, and reports enter, exit, threshold
+    and dwell events to the camera event system and MQTT.
 </p>
 
-<section class="cards" id="oqCards"></section>
-
 <section class="panel">
-    <h2>Object classes seen <span class="hint">answers OQ-3 &mdash; which types this camera emits</span></h2>
-    <div id="classes" class="chips"><span class="empty">waiting for detections&hellip;</span></div>
-    <p class="note" id="classNote"></p>
+    <h2>In zone now <span class="hint">elapsed counts up live; overage is time past the threshold</span></h2>
+    <table id="objectsTable">
+        <thead>
+            <tr><th>Object</th><th>Type</th><th>Zone</th><th>Elapsed</th><th>Overage</th><th>State</th></tr>
+        </thead>
+        <tbody><tr class="empty-row"><td colspan="6">nothing in zone</td></tr></tbody>
+    </table>
 </section>
 
 <div class="two-col">
     <section class="panel">
-        <h2>Stationary tracks in view <span class="hint">how long a still object keeps its track &mdash; FR-5 evidence</span></h2>
-        <table id="liveTable">
-            <thead><tr><th>Track</th><th>Age</th><th>Movement</th><th>Class</th></tr></thead>
-            <tbody><tr class="empty-row"><td colspan="4">nothing in view</td></tr></tbody>
-        </table>
+        <h2>Zones</h2>
+        <ul id="zoneList" class="zonelist"><li class="empty">loading&hellip;</li></ul>
+        <p class="note">
+            Zone editing arrives with the configuration UI. Until then the application writes a
+            default centred rectangle to <code>localdata/zones.json</code> on first run.
+        </p>
     </section>
 
     <section class="panel">
-        <h2>Counters</h2>
-        <dl id="counters" class="counters"></dl>
+        <h2>Health <span class="hint">running is not the same as working</span></h2>
+        <dl id="health" class="counters"></dl>
     </section>
 </div>
 
 <section class="panel">
-    <h2>Ended tracks <span class="hint">max gap shows how long the camera bridges an absence</span></h2>
-    <table id="endedTable">
-        <thead>
-            <tr><th>Track</th><th>Lifetime</th><th>Frames</th><th>Max gap</th><th>Movement</th><th>Class</th></tr>
-        </thead>
-        <tbody><tr class="empty-row"><td colspan="6">no completed tracks yet</td></tr></tbody>
-    </table>
+    <h2>Test events <span class="hint">fires a real event and MQTT record flagged test=true</span></h2>
+    <p class="note">
+        Use these to wire and prove a VMS rule with nothing in the scene. Each one travels the same
+        path a genuine dwell event takes.
+    </p>
+    <div class="buttons">
+        <button type="button" data-kind="entered">Test Enter</button>
+        <button type="button" data-kind="exited">Test Exit</button>
+        <button type="button" data-kind="threshold">Test Threshold Exceeded</button>
+    </div>
+    <p class="result" id="testResult"></p>
 </section>
 
 <section class="panel">
-    <h2>Device Data Hub topics <span class="hint">answers OQ-1</span></h2>
-    <div id="topics" class="chips mono"><span class="empty">reading&hellip;</span></div>
+    <h2>Object classes seen <span class="hint">what this camera actually emits</span></h2>
+    <div id="classes" class="chips"><span class="empty">waiting for detections&hellip;</span></div>
+    <p class="note" id="classNote"></p>
 </section>
 
 <footer>
     <span id="stamp">&mdash;</span>
-    <a href="/axis-cgi/admin/systemlog.cgi?appname=object_dwell_timer" target="_blank" rel="noopener">raw application log</a>
+    <a href="/axis-cgi/admin/systemlog.cgi?appname=object_dwell_timer" target="_blank" rel="noopener">application log</a>
 </footer>
 
 <script src="app.js"></script>

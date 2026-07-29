@@ -18,7 +18,19 @@
             ]
         },
         "configuration": {
-            "settingPage": "index.html"
+            "settingPage": "index.html",
+            "reverseProxy": [
+                {
+                    "apiPath": "status",
+                    "target": "http://127.0.0.1:2101",
+                    "access": "viewer"
+                },
+                {
+                    "apiPath": "api",
+                    "target": "http://127.0.0.1:2101",
+                    "access": "admin"
+                }
+            ]
         }
     },
     "resources": {

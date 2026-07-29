@@ -3,10 +3,10 @@
 An AXIS ACAP that measures how long selected object types stay inside user-drawn zones and emits
 enter / exit / dwell / threshold events to the camera event system and MQTT.
 
-> **Status: Phase 0 (design spike). Not yet functional as a dwell timer.**
-> The current build consumes scene metadata and reports what the hardware actually does, so the
-> timer logic is built on measurements rather than assumptions. See
-> [Project status](#project-status) for exactly what is and is not implemented.
+> **Status: Phase 1. Timing works; there is no configuration UI yet.**
+> Zones, per-object dwell timers, enter/exit/threshold events, MQTT output and test triggers are
+> implemented and verified. Zones and settings are not yet editable from the browser. See
+> [Project status](#project-status).
 
 ## How it works
 
@@ -81,63 +81,126 @@ Restore signing enforcement afterwards:
 curl --anyauth -u root:PASSWORD -X POST "http://DEVICE_IP/axis-cgi/applications/config.cgi?action=set&name=AllowUnsigned&value=false"
 ```
 
+## Endpoints
+
+Served through the manifest's `reverseProxy`, so the device supplies TLS, authentication and access
+level. Apache forwards the full URI, so handlers match the complete path.
+
+| Path | Access | Method | Purpose |
+|---|---|---|---|
+| `/local/object_dwell_timer/status` | viewer | GET | in-zone objects with elapsed and overage, plus zone definitions |
+| `/local/object_dwell_timer/api/health` | admin | GET | whether metadata is actually being received |
+| `/local/object_dwell_timer/api/zones` | admin | GET | zone definitions |
+| `/local/object_dwell_timer/api/test` | admin | POST | fire a real event flagged `test=true` |
+
 ## Verify it is working
 
 `Status="Running"` is **not** evidence the app works — an ACAP can report running while its data
-source never connects. Check the application log instead:
+source never connects. Ask the app instead:
+
+```bash
+curl --anyauth -u root:PASSWORD "http://DEVICE_IP/local/object_dwell_timer/api/health"
+```
+
+`ok` is true only when the subscription exists *and* frames are arriving.
+
+Prove the whole event path without waiting for an object, which also wires a VMS rule:
+
+```bash
+curl --anyauth -u root:PASSWORD -X POST "http://DEVICE_IP/local/object_dwell_timer/api/test?kind=entered"
+```
+
+Valid `kind` values are `entered`, `exited`, `threshold`, `update`. Each sends a genuine AXEvent
+and, if the device MQTT client is configured, a genuine MQTT record — flagged `test=true`.
+
+Watch them land:
+
+```bash
+mosquitto_sub -h BROKER -t '#' -v
+```
+
+The application log carries parseable prefixes (`DWELL_ENTER`, `DWELL_EXIT`, `DWELL_THRESHOLD`,
+`DWELL_SUMMARY`, `DWELL_CLASSES`, `DWELL_CLOCKSTEP`):
 
 ```bash
 curl --anyauth -u root:PASSWORD "http://DEVICE_IP/axis-cgi/admin/systemlog.cgi?appname=object_dwell_timer"
 ```
 
-Every line is prefixed for machine parsing. The ones that matter:
+## Events
 
-| Prefix | Meaning |
-|---|---|
-| `SPIKE_OQ1` | whether `com.axis.scene.frame.v1` is present on this device |
-| `SPIKE_TOPIC` | each Device Data Hub topic offered |
-| `SPIKE_SUMMARY` | frame/detection counters and frame rate, every 30 s |
-| `SPIKE_CLASSES` | every distinct `class.type` seen so far |
-| `SPIKE_NEWTRACK` | first sight of a track, including coordinate-frame sanity checks |
-| `SPIKE_TRACKEND` | lifetime, max gap, movement and class of a completed track |
-| `SPIKE_STATIONARY` | live still-tracks and their running age |
+Topic path `tnsaxis:CameraApplicationPlatform/ObjectDwellTimer/<Name>` — `Entered`, `Exited`,
+`ThresholdExceeded`, `DwellUpdate`. `zone` is declared as an ONVIF **source** key, which makes it a
+selectable instance in a VMS and puts it in the MQTT topic path:
 
-The web page renders the same data, refreshed every 5 s.
+```
+axis/<SERIAL>/event/tns:axis/CameraApplicationPlatform/ObjectDwellTimer/Exited/$source/zone/1
+```
 
-## Configuration parameters
+Data fields: `objectId`, `objectType`, `state`, `elapsedSeconds`, `thresholdExceeded`,
+`overageSeconds`, `utcTime`, `test`.
 
-None yet — the spike has no configurable behaviour. The parameters below are the planned set
-(see [docs/implementation-plan.md](docs/implementation-plan.md)); they are **not implemented**.
+> **For integrators:** the MQTT bridge stringifies every value — booleans arrive as `"1"`/`"0"` and
+> doubles as `"112.000000"`. The bridge's own `timestamp` is epoch milliseconds; the `utcTime`
+> field carries ISO-8601 UTC from the camera's NTP-synced clock.
 
-| Parameter | Default | Purpose |
+## Tests
+
+The timing rules are exercised on the host — `tracker.c` and `zone.c` depend only on glib, jansson
+and libm, so the state machine can be driven with synthetic frames instead of a parked truck:
+
+```bash
+docker run --rm -v "$PWD":/src -w /src ubuntu:24.04 sh test/run.sh
+```
+
+## Configuration
+
+Behaviour is active with the defaults below. They are compiled in for now — the editing UI and
+AXParameter wiring arrive in Phase 2. Zones persist in `localdata/zones.json`, which survives
+reboot and firmware upgrade.
+
+| Setting | Default | Purpose |
 |---|---|---|
-| `objectTypes` | `Truck` | Classes that count as dwelling objects |
-| `minScore` | `0.5` | Minimum classification confidence |
+| object types | all real classes | Classes that count as dwelling objects. `Head` and `LicensePlate` are always excluded — they are attributes of a parent object. |
+| `minScore` | `0.30` | Minimum classification confidence |
 | `fallbackToVehicle` | `true` | Treat an undetermined vehicle sub-type as `Vehicle` |
-| `referencePoint` | `bottomCenter` | Point tested against the polygon; or `centroid` |
-| `enterDebounce` / `exitDebounce` | `0.5 s` / `2.0 s` | Hysteresis on zone entry and exit |
-| `updateInterval` | `10 s` | Periodic dwell-update event interval |
-| `dwellThreshold` | `100 s` | Threshold that triggers the exceeded event and overage reporting |
-| `occlusionMaxGap` | TBD | Gap budget after `TrackEnded` for a moving object |
-| `stationaryHold` | TBD | Gap budget after `TrackEnded` for an object that was still |
-| `mqttAutoConfigure` | `true` | Let the app configure the device MQTT event bridge |
-| `overlayEnabled` | `false` | Draw zones and elapsed times on the video stream |
+| reference point | bottom-centre | Point tested against the polygon; footprint rather than centroid |
+| enter / exit debounce | `0.5 s` / `2.0 s` | Hysteresis on zone entry and exit |
+| update interval | `10 s` | Periodic dwell-update event interval |
+| dwell threshold | `100 s` | Triggers the exceeded event and overage reporting |
+| `occlusionMaxGap` | `60 s` | Gap budget **after `TrackEnded`** for an object that was moving |
+| `stationaryHold` | `300 s` | Gap budget **after `TrackEnded`** for an object that was still |
 
-The two `TBD` defaults are deliberately unset — they depend on a measurement not yet taken
-(see [Known limitations](#known-limitations)).
+Two defaults deserve explanation:
+
+- **Object types default to every real class**, not to `Truck` as FR-2 specifies. Until the config
+  UI exists there is no way to change this on-device, and a `Truck`-only default makes the
+  application untestable on any scene without a truck in it. This narrows to `Truck` when Phase 2
+  lands.
+- **`occlusionMaxGap` is 60 s, not the 5 s originally planned.** The camera's own tracker was
+  measured reusing a single track id across absences of 41.9 s and 49.1 s. A shorter budget would
+  declare an exit while the source still considers the object continuous. Note the budget only
+  starts once `TrackEnded` arrives — mere absence never ends a dwell.
+
+`stationaryHold` remains provisional pending the stationary-lifetime measurement.
 
 ## Project status
 
 | Phase | State |
 |---|---|
-| **0 — Design spike** | **Done.** Metadata consumption, track statistics, status page, build and deploy pipeline, MQTT plumbing verified. |
-| 1 — Zones, timers, events | Not started. Point-in-polygon, per-object state machine, AXEvent output, status endpoint. |
-| 2 — Config UI | Not started. Zone drawing, AXParameter, persistence, test buttons. |
+| **0 — Design spike** | **Done.** Metadata consumption, coordinate frame, class behaviour, track continuity, MQTT topic and payload format all measured on hardware. |
+| **1 — Zones, timers, events** | **Done.** Point-in-polygon, per-object state machine, AXEvent output, status and health endpoints, test triggers. 60 unit tests pass; the event path is verified end-to-end to a live broker. |
+| 2 — Config UI | Not started. Zone drawing on a snapshot, AXParameter, live settings. |
 | 3 — MQTT | Not started. Bridge auto-configuration, copy-able resolved topics. |
 | 4 — Overlay | Not started. |
 | 5 — Hardening | Not started. Security audit, signing, release audit. |
 
-No acceptance criterion (AC-1 … AC-7) has been verified yet.
+**Verified:** the event and MQTT path end-to-end (AC-5, via the test triggers), and the timing
+rules by unit test — enter/exit debounce, total dwell, threshold and overage, independent
+per-object timers, `Rename` continuity, late-classification backdating, gap budgets, and the clock
+guard.
+
+**Not yet verified on hardware:** AC-1 to AC-4, AC-6 and AC-7 with real objects, because the test
+camera views an indoor office. The logic behind each is unit-tested; what is missing is a scene.
 
 ## Known limitations
 

@@ -184,6 +184,47 @@ Two consequences for our event design:
 
 ---
 
+## Our own events, verified end-to-end (Phase 1)
+
+`POST api/test` → AXEvent → device MQTT bridge → broker, with nothing in the scene. The Phase 0
+prediction about source keys held exactly:
+
+```
+axis/<SERIAL>/event/tns:axis/CameraApplicationPlatform/ObjectDwellTimer/Entered/$source/zone/1
+```
+
+```json
+{"topic":"axis:CameraApplicationPlatform/ObjectDwellTimer/Entered",
+ "timestamp":1785332731817,
+ "message":{"source":{"zone":"1"},"key":{},
+            "data":{"objectType":"Truck","elapsedSeconds":"0.000000",
+                    "thresholdExceeded":"0","utcTime":"2026-07-29T13:45:31.817493Z",
+                    "objectId":"00000000-0000-0000-0000-000000000000",
+                    "test":"1","overageSeconds":"0.000000","state":"in"}}}
+```
+
+Confirms, on our own events rather than by analogy with someone else's:
+
+- Declaring `zone` as an AXEvent **source** key puts it in the MQTT topic path, so a VMS really can
+  subscribe to one zone.
+- Booleans arrive as `"1"` / `"0"` strings and doubles as fixed-point strings
+  (`"112.000000"`). Do not promise integrators JSON numbers or booleans.
+- The bridge's own `timestamp` is epoch-ms, so the ISO-8601 `utcTime` data field is what carries
+  IF-4's NTP-synced UTC.
+
+## The frame topic is sparse — and that breaks a naive clock guard
+
+Worth stating separately because it caused a real bug. The metadata topic is **event-paced, not
+video-paced**: ~0.5 fps with an empty scene and arbitrarily long quiet periods.
+
+A clock-step guard that compares consecutive *frame timestamps* therefore cannot distinguish "the
+scene was quiet for 40 s" from "NTP moved the clock 40 s". The first implementation did exactly
+that and silently rebased every dwell timer on every quiet period.
+
+The fix is to carry a monotonic reading alongside each frame and compare how much **each** clock
+advanced. Only divergence between them is a real step. Anything on this platform that reasons about
+elapsed time from metadata timestamps needs the same treatment.
+
 ## AOA already has a "TimeInArea" scenario — and it confirms our premise
 
 The catch-all capture shows AOA publishing:

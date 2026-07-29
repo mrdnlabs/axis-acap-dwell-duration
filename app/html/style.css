@@ -170,6 +170,68 @@ tr:last-child td { border-bottom: none; }
 .counters dt { color: var(--muted); font-size: 13px; }
 .counters dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
 
+/* --- live dwell table --- */
+.timer {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+    font-size: 15px;
+    font-weight: 620;
+}
+tr.over .timer { color: var(--bad); }
+.over-value { color: var(--bad); }
+.state { color: var(--muted); font-size: 13px; }
+.tag {
+    display: inline-block;
+    margin-left: 7px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--chip);
+    font-size: 11px;
+    color: var(--muted);
+}
+
+/* --- zones --- */
+.zonelist { list-style: none; margin: 0; padding: 0; }
+.zonelist li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--line);
+}
+.zonelist li:last-child { border-bottom: none; }
+.zone-name { font-weight: 600; }
+.zone-meta { color: var(--muted); font-size: 12.5px; }
+
+/* --- test buttons --- */
+.buttons { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 4px; }
+.buttons button {
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 560;
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 8px 15px;
+    cursor: pointer;
+}
+.buttons button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.buttons button:disabled { opacity: 0.55; cursor: default; }
+.buttons button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.result { font-size: 13px; color: var(--muted); margin: 12px 0 0; min-height: 1.2em; }
+.result.good { color: var(--ok); }
+.result.bad { color: var(--bad); }
+
+code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    background: var(--chip);
+    padding: 1px 5px;
+    border-radius: 4px;
+}
+
 footer {
     display: flex;
     justify-content: space-between;
