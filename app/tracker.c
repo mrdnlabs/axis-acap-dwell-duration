@@ -496,6 +496,34 @@ void tracker_end_frame(tracker_t* t) {
     g_ptr_array_free(doomed, TRUE);
 }
 
+/* ------------------------------------------------------------ reconfiguration */
+
+void tracker_set_config(tracker_t* t, const config_t* cfg) {
+    t->cfg = *cfg;
+}
+
+void tracker_set_zones(tracker_t* t, const zone_set_t* zones) {
+    GHashTableIter iter;
+    gpointer       key, value;
+
+    g_hash_table_iter_init(&iter, t->tracks);
+    while (g_hash_table_iter_next(&iter, &key, &value)) {
+        force_exit(t, (track_t*)value, "zones-changed");
+    }
+
+    t->zones = *zones;
+
+    /* Per-zone slots are indexed by position, so any stale state left over
+     * would now describe a different zone. force_exit cleared the active ones;
+     * clear the rest so nothing carries across. */
+    g_hash_table_iter_init(&iter, t->tracks);
+    while (g_hash_table_iter_next(&iter, &key, &value)) {
+        memset(((track_t*)value)->z, 0, sizeof(((track_t*)value)->z));
+    }
+
+    syslog(LOG_INFO, "DWELL_ZONES_APPLIED count=%d", zones->n_zones);
+}
+
 /* ---------------------------------------------------------------- reporting */
 
 char* tracker_status_json(tracker_t* t) {

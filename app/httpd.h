@@ -29,6 +29,7 @@
 typedef char* (*httpd_body_fn)(const char* endpoint,
                                const char* method,
                                const char* query,
+                               const char* body,
                                void* user);
 
 bool httpd_start(guint16 port, httpd_body_fn body_fn, void* user);

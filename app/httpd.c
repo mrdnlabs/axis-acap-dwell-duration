@@ -10,8 +10,8 @@
 #include <string.h>
 #include <syslog.h>
 
-#define APP_PREFIX  "/local/object_dwell_timer"
-#define MAX_REQUEST 2048
+#define APP_PREFIX   "/local/object_dwell_timer"
+#define MAX_REQUEST  65536 /* zone polygons are the largest thing posted here */
 #define IO_TIMEOUT_S 3
 
 static GSocketService* service = NULL;
@@ -33,6 +33,7 @@ static const char* endpoint_for(const char* path) {
         {"/api/health", "health"},
         {"/api/zones", "zones"},
         {"/api/test", "test"},
+        {"/api/config", "config"},
     };
 
     for (size_t i = 0; i < G_N_ELEMENTS(routes); i++) {
@@ -87,13 +88,64 @@ static gboolean on_incoming(GSocketService* svc,
     GInputStream*  in  = g_io_stream_get_input_stream(G_IO_STREAM(connection));
     GOutputStream* out = g_io_stream_get_output_stream(G_IO_STREAM(connection));
 
-    char    buf[MAX_REQUEST + 1];
-    gssize  n = g_input_stream_read(in, buf, MAX_REQUEST, NULL, NULL);
-    if (n <= 0) {
+    /* Read until the header terminator is in hand, then read exactly as many
+     * body bytes as Content-Length declares. A single read is not enough — a
+     * PUT of zone polygons arrives across several packets. */
+    static char buf[MAX_REQUEST + 1];
+    gsize       have       = 0;
+    gssize      header_end = -1;
+
+    while (have < MAX_REQUEST) {
+        const gssize n = g_input_stream_read(in, buf + have, MAX_REQUEST - have, NULL, NULL);
+        if (n <= 0) {
+            break;
+        }
+        have += (gsize)n;
+        buf[have] = '\0';
+
+        const char* marker = strstr(buf, "\r\n\r\n");
+        if (marker) {
+            header_end = (gssize)(marker - buf) + 4;
+            break;
+        }
+    }
+
+    if (header_end < 0) {
+        respond(out, 400, "Bad Request", "{\"error\":\"malformed request\"}");
+        g_output_stream_flush(out, NULL, NULL);
         g_io_stream_close(G_IO_STREAM(connection), NULL, NULL);
         return TRUE;
     }
-    buf[n] = '\0';
+
+    /* Headers are case-insensitive; find Content-Length without disturbing buf. */
+    gsize content_length = 0;
+    {
+        char* headers = g_ascii_strdown(buf, header_end);
+        char* cl      = strstr(headers, "content-length:");
+        if (cl) {
+            content_length = (gsize)g_ascii_strtoull(cl + strlen("content-length:"), NULL, 10);
+        }
+        g_free(headers);
+    }
+
+    if (content_length > MAX_REQUEST - (gsize)header_end) {
+        respond(out, 413, "Payload Too Large", "{\"error\":\"body too large\"}");
+        g_output_stream_flush(out, NULL, NULL);
+        g_io_stream_close(G_IO_STREAM(connection), NULL, NULL);
+        return TRUE;
+    }
+
+    while (have < (gsize)header_end + content_length) {
+        const gssize n =
+            g_input_stream_read(in, buf + have, (gsize)header_end + content_length - have, NULL, NULL);
+        if (n <= 0) {
+            break;
+        }
+        have += (gsize)n;
+    }
+    buf[have] = '\0';
+
+    char* body = g_strndup(buf + header_end, content_length);
 
     /* Request line only: METHOD SP PATH SP VERSION */
     char* line_end = strstr(buf, "\r\n");
@@ -105,10 +157,11 @@ static gboolean on_incoming(GSocketService* svc,
     const char* method = parts[0] ? parts[0] : "";
     const char* target = parts[1] ? parts[1] : "";
 
-    const bool is_get  = strcmp(method, "GET") == 0;
-    const bool is_post = strcmp(method, "POST") == 0;
-    if (!is_get && !is_post) {
-        respond(out, 405, "Method Not Allowed", "{\"error\":\"only GET and POST are supported\"}");
+    const bool is_get   = strcmp(method, "GET") == 0;
+    const bool is_write = strcmp(method, "POST") == 0 || strcmp(method, "PUT") == 0;
+    if (!is_get && !is_write) {
+        respond(out, 405, "Method Not Allowed",
+                "{\"error\":\"only GET, POST and PUT are supported\"}");
         goto done;
     }
 
@@ -128,23 +181,25 @@ static gboolean on_incoming(GSocketService* svc,
     }
 
     /* Anything that changes state or emits must not be reachable by GET — a
-     * link or a prefetch should never be able to fire an event into a VMS. */
-    if (strcmp(endpoint, "test") == 0 && !is_post) {
+     * link or a prefetch should never be able to fire an event into a VMS or
+     * rewrite the configuration. */
+    if (strcmp(endpoint, "test") == 0 && !is_write) {
         respond(out, 405, "Method Not Allowed", "{\"error\":\"POST required\"}");
         g_free(path);
         goto done;
     }
 
-    char* body = body_fn ? body_fn(endpoint, method, query, body_user) : NULL;
-    if (body) {
-        respond(out, 200, "OK", body);
-        g_free(body);
+    char* resp = body_fn ? body_fn(endpoint, method, query, body, body_user) : NULL;
+    if (resp) {
+        respond(out, 200, "OK", resp);
+        g_free(resp);
     } else {
         respond(out, 503, "Service Unavailable", "{\"error\":\"not ready\"}");
     }
     g_free(path);
 
 done:
+    g_free(body);
     g_strfreev(parts);
     g_output_stream_flush(out, NULL, NULL);
     g_io_stream_close(G_IO_STREAM(connection), NULL, NULL);

@@ -35,6 +35,7 @@
 #include <datahub/common.h>
 #include <datahub/subscriber.h>
 
+#include "config.h"
 #include "dwell.h"
 #include "events.h"
 #include "httpd.h"
@@ -85,7 +86,9 @@ static gboolean on_signal(gpointer user_data);
 static char* http_body(const char* endpoint,
                        const char* method,
                        const char* query,
+                       const char* body,
                        void* user);
+static void on_config_changed(void* user);
 static void     on_emit(const dwell_event_t* ev, void* user);
 
 /* ------------------------------------------------------------------ helpers */
@@ -383,15 +386,138 @@ static char* handle_test(const char* query) {
     return out;
 }
 
+/** A JSON string literal for `text`, quotes included. Caller frees. */
+static char* json_quoted(const char* text) {
+    json_t* s   = json_string(text ? text : "");
+    char*   raw = json_dumps(s, JSON_ENCODE_ANY);
+    json_decref(s);
+    char* out = g_strdup(raw ? raw : "\"\"");
+    free(raw);
+    return out;
+}
+
+/** Reload settings whenever a parameter changes, from any source. */
+static void on_config_changed(void* user) {
+    (void)user;
+
+    /* Read into a local copy with no lock held — config_reload talks to the
+     * parameter service over D-Bus, and the state lock must never be held
+     * across I/O. Only installing the result needs the lock. */
+    config_t fresh;
+    g_mutex_lock(&state.lock);
+    fresh = state.cfg;
+    g_mutex_unlock(&state.lock);
+
+    config_reload(&fresh);
+
+    g_mutex_lock(&state.lock);
+    state.cfg = fresh;
+    tracker_set_config(state.tracker, &state.cfg);
+    g_mutex_unlock(&state.lock);
+
+    syslog(LOG_INFO,
+           "CONFIG_APPLIED types=%d threshold_s=%.1f enter_s=%.2f exit_s=%.2f",
+           state.cfg.n_types,
+           state.cfg.threshold_s,
+           state.cfg.enter_debounce_s,
+           state.cfg.exit_debounce_s);
+}
+
+static char* handle_config(const char* method, const char* body) {
+    if (strcmp(method, "GET") == 0) {
+        g_mutex_lock(&state.lock);
+        char* out = config_to_json(&state.cfg);
+        g_mutex_unlock(&state.lock);
+        return out;
+    }
+
+    /* Deliberately not holding state.lock: ax_parameter_set can invoke the
+     * change callback synchronously, and that callback takes the lock. */
+    char* err = config_apply_json(body);
+    if (err) {
+        char* quoted = json_quoted(err);
+        char* out    = g_strdup_printf("{\"error\":%s}", quoted);
+        g_free(quoted);
+        g_free(err);
+        return out;
+    }
+
+    /* Re-read rather than trusting the request: parameters may have been
+     * clamped, and anything absent from the body is unchanged. */
+    on_config_changed(NULL);
+
+    g_mutex_lock(&state.lock);
+    char* current = config_to_json(&state.cfg);
+    g_mutex_unlock(&state.lock);
+
+    char* out = g_strdup_printf("{\"saved\":true,\"config\":%s}", current);
+    g_free(current);
+    return out;
+}
+
+static char* handle_zones(const char* method, const char* body) {
+    if (strcmp(method, "GET") == 0) {
+        g_mutex_lock(&state.lock);
+        char* out = zone_to_json(&state.zones);
+        g_mutex_unlock(&state.lock);
+        return out;
+    }
+
+    zone_set_t parsed;
+    char*      err = zone_parse_json(body, &parsed);
+    if (err) {
+        char* quoted = json_quoted(err);
+        char* out    = g_strdup_printf("{\"error\":%s}", quoted);
+        g_free(quoted);
+        g_free(err);
+        return out;
+    }
+
+    g_mutex_lock(&state.lock);
+    const bool saved = zone_save(&parsed, ZONES_PATH);
+    if (saved) {
+        state.zones = parsed;
+        /* Closes any dwell in progress with a proper Exited record before the
+         * geometry it was measured against disappears. Those events still go
+         * out under the current declarations, which is why the re-declaration
+         * below happens afterwards. */
+        tracker_set_zones(state.tracker, &parsed);
+    }
+    g_mutex_unlock(&state.lock);
+
+    if (!saved) {
+        return g_strdup("{\"error\":\"could not persist zones\"}");
+    }
+
+    /* Declarations are keyed by zone id, so a changed zone set needs new ones.
+     * Outside the lock — this performs IPC. */
+    if (!events_reinit(&parsed)) {
+        syslog(LOG_WARNING, "EVENT_REINIT incomplete after zone change");
+    }
+
+    char* zones = zone_to_json(&parsed);
+    char* out   = g_strdup_printf("{\"saved\":true,\"zones\":%s}", zones);
+    g_free(zones);
+    return out;
+}
+
 static char* http_body(const char* endpoint,
                        const char* method,
                        const char* query,
+                       const char* body,
                        void* user) {
     (void)user;
-    (void)method;
 
     if (strcmp(endpoint, "test") == 0) {
         return handle_test(query);
+    }
+
+    if (strcmp(endpoint, "config") == 0) {
+        return handle_config(method, body);
+    }
+
+    if (strcmp(endpoint, "zones") == 0) {
+        return handle_zones(method, body);
     }
 
     if (strcmp(endpoint, "status") == 0) {
@@ -404,13 +530,6 @@ static char* http_body(const char* endpoint,
         g_free(objects);
         g_free(zones);
         return out;
-    }
-
-    if (strcmp(endpoint, "zones") == 0) {
-        g_mutex_lock(&state.lock);
-        char* zones = zone_to_json(&state.zones);
-        g_mutex_unlock(&state.lock);
-        return zones;
     }
 
     if (strcmp(endpoint, "health") == 0) {
@@ -676,6 +795,7 @@ static void cleanup_resources(void) {
     }
 
     events_shutdown();
+    config_shutdown();
 
     if (state.tracker) {
         tracker_free(state.tracker);
@@ -707,6 +827,12 @@ int main(void) {
     load_zones();
 
     state.tracker = tracker_new(&state.cfg, &state.zones, on_emit, NULL);
+
+    /* After the tracker exists — a parameter callback can fire during init. */
+    if (!config_init(&state.cfg, on_config_changed, NULL)) {
+        syslog(LOG_WARNING, "CONFIG_INIT failed; running with compiled-in defaults");
+    }
+    tracker_set_config(state.tracker, &state.cfg);
 
     if (!events_init(&state.zones)) {
         syslog(LOG_WARNING, "EVENT_INIT incomplete — dwell records may not reach the VMS");

@@ -48,6 +48,17 @@ void tracker_track_ended(tracker_t* t, const char* track_id);
 void tracker_detection(tracker_t* t, const detection_t* d);
 void tracker_end_frame(tracker_t* t);
 
+/** Apply new settings without disturbing dwells already in progress. */
+void tracker_set_config(tracker_t* t, const config_t* cfg);
+
+/**
+ * Replace the zone set. Every dwell in progress is closed with a normal Exited
+ * record first — the polygons they were measured against no longer exist, so
+ * silently re-anchoring them to new geometry would report a dwell that never
+ * happened.
+ */
+void tracker_set_zones(tracker_t* t, const zone_set_t* zones);
+
 /** Current in-zone objects as a JSON array. Caller frees with g_free(). */
 char* tracker_status_json(tracker_t* t);
 

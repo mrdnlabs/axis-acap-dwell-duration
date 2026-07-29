@@ -1,9 +1,9 @@
 PROG      = $(shell jq -r '.acapPackageConf.setup.appName' manifest.json)
-SRCS      = object_dwell_timer.c zone.c tracker.c events.c httpd.c
+SRCS      = object_dwell_timer.c zone.c tracker.c events.c httpd.c config.c
 OBJS      = $(SRCS:.c=.o)
 DEBUG_DIR = debug
 
-PKGS = device-data-hub-client-c jansson glib-2.0 gio-2.0 axevent
+PKGS = device-data-hub-client-c jansson glib-2.0 gio-2.0 axevent axparameter
 
 CFLAGS += $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags $(PKGS))
 LDLIBS += $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs $(PKGS)) -lm

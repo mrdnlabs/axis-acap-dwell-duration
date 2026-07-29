@@ -212,6 +212,43 @@ Confirms, on our own events rather than by analogy with someone else's:
 - The bridge's own `timestamp` is epoch-ms, so the ISO-8601 `utcTime` data field is what carries
   IF-4's NTP-synced UTC.
 
+## AXParameter callbacks deadlock if you read a parameter inside them
+
+Calling `ax_parameter_get()` from inside an `ax_parameter_register_callback` handler **deadlocks
+the application and the request that triggered it**. The synchronous get waits for a reply on the
+same connection that is currently delivering the callback.
+
+The symptom is nasty because it does not look like an application bug: a `param.cgi?action=update`
+request simply never returns, and the ACAP stops answering everything — including its own health
+endpoint. Nothing is logged. Recovery needs an application stop/start.
+
+The fix is to do no parameter work inside the callback. Defer it:
+
+```c
+static gboolean reload_on_idle(gpointer d) { pending = 0; reload(); return G_SOURCE_REMOVE; }
+
+static void on_param_changed(const gchar* name, const gchar* value, gpointer d) {
+    if (pending == 0) pending = g_idle_add(reload_on_idle, NULL);   /* also coalesces */
+}
+```
+
+Coalescing matters as well: saving a settings form writes several parameters, and each one fires
+its own callback.
+
+Related, and worth stating: `ax_parameter_get()` is D-Bus I/O. Do not hold an application mutex
+across it. Read into a local copy first, then take the lock only to install the result.
+
+### Parameter group capitalization
+
+Also confirmed on device — the group name is **not** the manifest `appName` verbatim. `appName`
+`object_dwell_timer` is stored as `root.Object_dwell_timer.*` (leading capital, underscores kept).
+`ax_parameter_get()` uses the short key and is unaffected; external `param.cgi` callers need the
+real name:
+
+```bash
+curl --anyauth -u root:PASS "http://<ip>/axis-cgi/param.cgi?action=list" | grep -i <appname>
+```
+
 ## The frame topic is sparse — and that breaks a naive clock guard
 
 Worth stating separately because it caused a real bug. The metadata topic is **event-paced, not

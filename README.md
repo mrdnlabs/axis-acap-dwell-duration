@@ -3,9 +3,9 @@
 An AXIS ACAP that measures how long selected object types stay inside user-drawn zones and emits
 enter / exit / dwell / threshold events to the camera event system and MQTT.
 
-> **Status: Phase 1. Timing works; there is no configuration UI yet.**
-> Zones, per-object dwell timers, enter/exit/threshold events, MQTT output and test triggers are
-> implemented and verified. Zones and settings are not yet editable from the browser. See
+> **Status: Phase 2. Configurable and working; no video overlay yet.**
+> Zones are drawn in the browser, settings apply live without a restart, and enter / exit /
+> threshold / dwell events reach the camera event system and MQTT. See
 > [Project status](#project-status).
 
 ## How it works
@@ -90,8 +90,12 @@ level. Apache forwards the full URI, so handlers match the complete path.
 |---|---|---|---|
 | `/local/object_dwell_timer/status` | viewer | GET | in-zone objects with elapsed and overage, plus zone definitions |
 | `/local/object_dwell_timer/api/health` | admin | GET | whether metadata is actually being received |
-| `/local/object_dwell_timer/api/zones` | admin | GET | zone definitions |
+| `/local/object_dwell_timer/api/zones` | admin | GET / PUT | zone polygons |
+| `/local/object_dwell_timer/api/config` | admin | GET / PUT | settings |
 | `/local/object_dwell_timer/api/test` | admin | POST | fire a real event flagged `test=true` |
+
+Writes are validated in full before anything is applied, so a rejected field cannot leave the
+configuration half-changed. State-changing endpoints refuse `GET`.
 
 ## Verify it is working
 
@@ -154,9 +158,19 @@ docker run --rm -v "$PWD":/src -w /src ubuntu:24.04 sh test/run.sh
 
 ## Configuration
 
-Behaviour is active with the defaults below. They are compiled in for now — the editing UI and
-AXParameter wiring arrive in Phase 2. Zones persist in `localdata/zones.json`, which survives
-reboot and firmware upgrade.
+Settings live in **AXParameter**, so they are visible and scriptable through `param.cgi` as well as
+the app's own page, and they survive a firmware upgrade. Changes apply immediately — from the UI,
+from `param.cgi`, or from the device's own settings page — with no restart.
+
+```bash
+curl --anyauth -u root:PASS "http://DEVICE_IP/axis-cgi/param.cgi?action=list&group=root.Object_dwell_timer"
+```
+
+> Note the group is `root.Object_dwell_timer`, not the manifest `appName` verbatim — AXIS OS
+> capitalizes the first letter. `ax_parameter_get()` inside the app is unaffected.
+
+Zone polygons are too structured for a parameter and live in `localdata/zones.json`, which also
+survives reboot and upgrade.
 
 | Setting | Default | Purpose |
 |---|---|---|
@@ -172,10 +186,9 @@ reboot and firmware upgrade.
 
 Two defaults deserve explanation:
 
-- **Object types default to every real class**, not to `Truck` as FR-2 specifies. Until the config
-  UI exists there is no way to change this on-device, and a `Truck`-only default makes the
-  application untestable on any scene without a truck in it. This narrows to `Truck` when Phase 2
-  lands.
+- **Object types default to every real class**, not to `Truck` as FR-2 specifies. A `Truck`-only
+  default ships an application that appears broken on any scene without a truck in it. The types
+  are now editable, so narrowing is one click; the shipped default stays inclusive deliberately.
 - **`occlusionMaxGap` is 60 s, not the 5 s originally planned.** The camera's own tracker was
   measured reusing a single track id across absences of 41.9 s and 49.1 s. A shorter budget would
   declare an exit while the source still considers the object continuous. Note the budget only
@@ -189,7 +202,7 @@ Two defaults deserve explanation:
 |---|---|
 | **0 — Design spike** | **Done.** Metadata consumption, coordinate frame, class behaviour, track continuity, MQTT topic and payload format all measured on hardware. |
 | **1 — Zones, timers, events** | **Done.** Point-in-polygon, per-object state machine, AXEvent output, status and health endpoints, test triggers. 60 unit tests pass; the event path is verified end-to-end to a live broker. |
-| 2 — Config UI | Not started. Zone drawing on a snapshot, AXParameter, live settings. |
+| **2 — Config UI** | **Done.** Multi-zone drawing on a live snapshot, AXParameter-backed settings that apply without a restart, server-side validation, zone persistence. |
 | 3 — MQTT | Not started. Bridge auto-configuration, copy-able resolved topics. |
 | 4 — Overlay | Not started. |
 | 5 — Hardening | Not started. Security audit, signing, release audit. |

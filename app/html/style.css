@@ -232,6 +232,98 @@ code {
     border-radius: 4px;
 }
 
+/* --- zone editor --- */
+.zone-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
+.tab {
+    font: inherit;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--muted);
+    cursor: pointer;
+}
+.tab.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.tab-count {
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    background: var(--chip);
+    border-radius: 999px;
+    padding: 0 6px;
+}
+
+.editor {
+    position: relative;
+    line-height: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--chip);
+    max-width: 960px;
+}
+.editor img { width: 100%; height: auto; display: block; }
+.editor canvas {
+    position: absolute;
+    inset: 0;
+    cursor: crosshair;
+    touch-action: none;
+}
+
+.buttons button.primary {
+    border-color: var(--accent);
+    color: #fff;
+    background: var(--accent);
+}
+.buttons button.primary:hover:not(:disabled) { filter: brightness(1.08); color: #fff; }
+
+/* --- settings form --- */
+form fieldset {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px 14px;
+    margin: 0 0 18px;
+}
+form legend { font-size: 13px; font-weight: 620; padding: 0 6px; color: var(--muted); }
+
+.checks { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.check, .inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13.5px;
+    cursor: pointer;
+}
+.inline { margin: 4px 0 18px; }
+.check input, .inline input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 16px;
+    margin-bottom: 6px;
+}
+.grid label { display: flex; flex-direction: column; gap: 5px; font-size: 13.5px; font-weight: 560; }
+.grid small { color: var(--muted); font-weight: 400; font-size: 12px; }
+.grid input, .grid select {
+    font: inherit;
+    font-size: 14px;
+    padding: 7px 9px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--ink);
+    width: 100%;
+}
+.grid input:focus, .grid select:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+    border-color: var(--accent);
+}
+
 footer {
     display: flex;
     justify-content: space-between;

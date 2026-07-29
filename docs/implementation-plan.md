@@ -311,7 +311,7 @@ threshold. GPU/CPU only, no DLPU. Doubles as the OQ-2 verification tool.
 |---|---|---|
 | **0** | **Done** | DDH subscribe + track statistics + status page + build/deploy + MQTT plumbing. OQ-1, OQ-2, IF-2 resolved on hardware. |
 | **1** | **Done** | `zone` + `tracker` + `events` + `httpd` + operator page. 60 host tests pass; AXEvent → MQTT verified end-to-end to a live broker. FR-10 test triggers pulled forward — they were the only way to verify the emit path without an object in frame. |
-| 2 | Not started | Zone drawing on a snapshot, AXParameter wiring, live settings. FR-11. |
+| **2** | **Done** | Multi-zone drawing on a snapshot, AXParameter-backed settings applying live, validated `PUT /api/config` and `/api/zones`, event re-declaration on zone change. FR-11. **[verified]** Per-zone MQTT topics confirmed with two zones: `…/Entered/$source/zone/1` and `…/ThresholdExceeded/$source/zone/2`. |
 | 3 | Not started | MQTT bridge auto-config, resolved-topic panel, `/api/mqtt`. IF-2. |
 | 4 | Not started | Overlay. FR-12. |
 | 5 | Not started | Security audit, signing, release audit. |

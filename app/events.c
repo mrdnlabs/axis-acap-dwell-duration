@@ -185,6 +185,11 @@ bool events_init(const zone_set_t* zones) {
     return declared_total > 0;
 }
 
+bool events_reinit(const zone_set_t* zones) {
+    events_shutdown();
+    return events_init(zones);
+}
+
 void events_shutdown(void) {
     if (!handler) {
         return;

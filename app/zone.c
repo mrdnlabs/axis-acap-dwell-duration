@@ -128,45 +128,64 @@ char* zone_to_json(const zone_set_t* zs) {
     return out;
 }
 
-bool zone_load(zone_set_t* zs, const char* path) {
-    json_error_t err;
-    json_t*      arr = json_load_file(path, 0, &err);
+char* zone_parse_json(const char* text, zone_set_t* out) {
+    json_error_t jerr;
+    json_t*      arr = json_loads(text ? text : "", 0, &jerr);
     if (!arr) {
-        return false;
+        return g_strdup_printf("invalid JSON: %s", jerr.text);
     }
     if (!json_is_array(arr)) {
-        syslog(LOG_WARNING, "ZONE_LOAD path=%s err=not-an-array", path);
         json_decref(arr);
-        return false;
+        return g_strdup("expected a JSON array of zones");
+    }
+    if (json_array_size(arr) == 0) {
+        json_decref(arr);
+        return g_strdup("at least one zone is required");
+    }
+    if (json_array_size(arr) > MAX_ZONES) {
+        json_decref(arr);
+        return g_strdup_printf("at most %d zones are supported", MAX_ZONES);
     }
 
     zone_set_t parsed;
     memset(&parsed, 0, sizeof(parsed));
+    char* error = NULL;
 
     size_t  idx;
     json_t* o;
     json_array_foreach(arr, idx, o) {
-        if (parsed.n_zones >= MAX_ZONES) {
-            syslog(LOG_WARNING, "ZONE_LOAD truncated at %d zones", MAX_ZONES);
+        json_t* verts = json_object_get(o, "vertices");
+        if (!json_is_array(verts)) {
+            error = g_strdup_printf("zone %zu: vertices must be an array", idx + 1);
             break;
         }
-        json_t* verts = json_object_get(o, "vertices");
-        if (!json_is_array(verts) || json_array_size(verts) < 3) {
-            syslog(LOG_WARNING, "ZONE_LOAD skipping zone %zu: needs >= 3 vertices", idx);
-            continue;
+        if (json_array_size(verts) < 3) {
+            error = g_strdup_printf("zone %zu: a polygon needs at least 3 points", idx + 1);
+            break;
+        }
+        if (json_array_size(verts) > MAX_ZONE_VERTS) {
+            error = g_strdup_printf("zone %zu: at most %d points", idx + 1, MAX_ZONE_VERTS);
+            break;
         }
 
         zone_t* z = &parsed.zones[parsed.n_zones];
         memset(z, 0, sizeof(*z));
 
         const json_int_t id = json_integer_value(json_object_get(o, "id"));
-        z->id               = (int)id;
-        if (z->id <= 0) {
-            z->id = parsed.n_zones + 1;
+        z->id               = (id > 0) ? (int)id : (int)(parsed.n_zones + 1);
+
+        for (int prev = 0; prev < parsed.n_zones; prev++) {
+            if (parsed.zones[prev].id == z->id) {
+                error = g_strdup_printf("duplicate zone id %d", z->id);
+                break;
+            }
+        }
+        if (error) {
+            break;
         }
 
         const char* name = json_string_value(json_object_get(o, "name"));
-        g_strlcpy(z->name, name ? name : "Zone", sizeof(z->name));
+        g_strlcpy(z->name, (name && *name) ? name : "Zone", sizeof(z->name));
 
         json_t* en = json_object_get(o, "enabled");
         z->enabled = en ? json_is_true(en) : true;
@@ -174,37 +193,55 @@ bool zone_load(zone_set_t* zs, const char* path) {
         size_t  vi;
         json_t* pt;
         json_array_foreach(verts, vi, pt) {
-            if (z->n_verts >= MAX_ZONE_VERTS) {
+            if (!json_is_array(pt) || json_array_size(pt) < 2) {
+                error = g_strdup_printf("zone %zu: point %zu must be [x, y]", idx + 1, vi + 1);
                 break;
             }
-            if (!json_is_array(pt) || json_array_size(pt) < 2) {
-                continue;
-            }
-            /* Clamp rather than reject: a slightly out-of-range vertex from a
-             * hand-edited file should not silently disable the whole zone. */
-            double x = json_number_value(json_array_get(pt, 0));
-            double y = json_number_value(json_array_get(pt, 1));
-            x        = CLAMP(x, 0.0, 1.0);
-            y        = CLAMP(y, 0.0, 1.0);
-
-            z->verts[z->n_verts].x = x;
-            z->verts[z->n_verts].y = y;
+            /* Clamp rather than reject — a vertex a hair outside the frame,
+             * from a hand-edited file or a drag past the edge, is an obvious
+             * intent rather than an error worth refusing the whole zone for. */
+            z->verts[z->n_verts].x = CLAMP(json_number_value(json_array_get(pt, 0)), 0.0, 1.0);
+            z->verts[z->n_verts].y = CLAMP(json_number_value(json_array_get(pt, 1)), 0.0, 1.0);
             z->n_verts++;
         }
-
-        if (z->n_verts >= 3) {
-            parsed.n_zones++;
+        if (error) {
+            break;
         }
+
+        parsed.n_zones++;
     }
 
     json_decref(arr);
 
+    if (error) {
+        return error;
+    }
     if (parsed.n_zones == 0) {
-        syslog(LOG_WARNING, "ZONE_LOAD path=%s err=no-usable-zones", path);
+        return g_strdup("no usable zones");
+    }
+
+    *out = parsed;
+    return NULL;
+}
+
+bool zone_load(zone_set_t* zs, const char* path) {
+    char*   text = NULL;
+    gsize   len  = 0;
+    GError* gerr = NULL;
+
+    if (!g_file_get_contents(path, &text, &len, &gerr)) {
+        g_clear_error(&gerr);
         return false;
     }
 
-    *zs = parsed;
+    char* err = zone_parse_json(text, zs);
+    g_free(text);
+
+    if (err) {
+        syslog(LOG_WARNING, "ZONE_LOAD path=%s err=%s", path, err);
+        g_free(err);
+        return false;
+    }
     return true;
 }
 

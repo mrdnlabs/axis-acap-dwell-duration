@@ -27,4 +27,11 @@ point_t zone_ref_point(const detection_t* d, ref_point_t mode);
 /** Serialize zones to a JSON array string. Caller frees with g_free(). */
 char* zone_to_json(const zone_set_t* zs);
 
+/**
+ * Parse and validate a JSON array of zones.
+ * Returns NULL on success, or a newly allocated error message; `out` is only
+ * written when the whole document is valid.
+ */
+char* zone_parse_json(const char* text, zone_set_t* out);
+
 #endif /* ZONE_H */

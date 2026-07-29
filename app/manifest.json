@@ -19,6 +19,22 @@
         },
         "configuration": {
             "settingPage": "index.html",
+            "paramConfig": [
+                {
+                    "name": "ObjectTypes",
+                    "default": "Human,Vehicle,Car,Truck,Bus,Bike,VehicleOther",
+                    "type": "string"
+                },
+                { "name": "MinScore", "default": "0.30", "type": "string" },
+                { "name": "FallbackToVehicle", "default": "yes", "type": "bool:no,yes" },
+                { "name": "ReferencePoint", "default": "bottomCenter", "type": "string" },
+                { "name": "EnterDebounce", "default": "0.5", "type": "string" },
+                { "name": "ExitDebounce", "default": "2.0", "type": "string" },
+                { "name": "UpdateInterval", "default": "10.0", "type": "string" },
+                { "name": "DwellThreshold", "default": "100.0", "type": "string" },
+                { "name": "OcclusionMaxGap", "default": "60.0", "type": "string" },
+                { "name": "StationaryHold", "default": "300.0", "type": "string" }
+            ],
             "reverseProxy": [
                 {
                     "apiPath": "status",

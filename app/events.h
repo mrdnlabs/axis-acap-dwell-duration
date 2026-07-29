@@ -20,6 +20,9 @@ bool events_init(const zone_set_t* zones);
 
 void events_shutdown(void);
 
+/** Re-declare for a changed zone set. Declarations are keyed by zone id. */
+bool events_reinit(const zone_set_t* zones);
+
 /** Matches tracker_emit_fn, so it can be handed straight to the tracker. */
 void events_emit(const dwell_event_t* ev, void* user);
 

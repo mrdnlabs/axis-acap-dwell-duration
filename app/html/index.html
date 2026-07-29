@@ -18,7 +18,7 @@
     </div>
 </header>
 
-<p class="lede" id="lede">
+<p class="lede">
     Times how long selected object types stay inside a zone, and reports enter, exit, threshold
     and dwell events to the camera event system and MQTT.
 </p>
@@ -33,14 +33,108 @@
     </table>
 </section>
 
+<section class="panel">
+    <h2>Zones <span class="hint">click the image to add points, drag to move, right-click a point to remove</span></h2>
+
+    <div class="zone-tabs" id="zoneTabs"></div>
+
+    <div class="editor" id="editor">
+        <img id="snapshot" alt="Camera view" src="/axis-cgi/jpg/image.cgi?resolution=1280x720">
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div class="buttons">
+        <button type="button" id="addZone">Add zone</button>
+        <button type="button" id="deleteZone">Delete zone</button>
+        <button type="button" id="clearPoints">Clear points</button>
+        <button type="button" id="refreshSnap">Refresh image</button>
+        <button type="button" id="saveZones" class="primary">Save zones</button>
+    </div>
+    <p class="result" id="zoneResult"></p>
+    <p class="note">
+        Saving zones closes any dwell in progress with a normal exit event first &mdash; the
+        polygons those timers were measured against are about to change.
+    </p>
+</section>
+
+<section class="panel">
+    <h2>Settings <span class="hint">applied immediately, no restart</span></h2>
+
+    <form id="settingsForm" autocomplete="off">
+        <fieldset>
+            <legend>Object types to time</legend>
+            <div id="typeChecks" class="checks"></div>
+            <p class="note">
+                <code>Head</code> and <code>LicensePlate</code> are never offered. They are
+                attributes of a parent object and carry their own track id, so counting them would
+                time the same object twice.
+            </p>
+        </fieldset>
+
+        <div class="grid">
+            <label>Minimum confidence
+                <input type="number" name="minScore" min="0" max="1" step="0.05">
+                <small>0&ndash;1. Detections below this are ignored.</small>
+            </label>
+            <label>Reference point
+                <select name="referencePoint">
+                    <option value="bottomCenter">Bottom centre (footprint)</option>
+                    <option value="centroid">Centroid</option>
+                </select>
+                <small>Which point of the box is tested against the polygon.</small>
+            </label>
+            <label>Dwell threshold (s)
+                <input type="number" name="dwellThreshold" min="0" max="86400" step="1">
+                <small>Crossing this fires an event; overage is reported afterwards.</small>
+            </label>
+            <label>Dwell update interval (s)
+                <input type="number" name="updateInterval" min="0" max="3600" step="1">
+                <small>0 disables periodic updates.</small>
+            </label>
+            <label>Enter debounce (s)
+                <input type="number" name="enterDebounce" min="0" max="60" step="0.1">
+                <small>Suppresses objects that only clip the zone.</small>
+            </label>
+            <label>Exit debounce (s)
+                <input type="number" name="exitDebounce" min="0" max="300" step="0.1">
+                <small>Measured from the first sighting outside.</small>
+            </label>
+            <label>Occlusion gap budget (s)
+                <input type="number" name="occlusionMaxGap" min="0" max="3600" step="1">
+                <small>Only starts once the camera ends the track. Absence alone never exits.</small>
+            </label>
+            <label>Stationary hold (s)
+                <input type="number" name="stationaryHold" min="0" max="86400" step="1">
+                <small>Longer budget for an object that was still when its track ended.</small>
+            </label>
+        </div>
+
+        <label class="inline">
+            <input type="checkbox" name="fallbackToVehicle">
+            Count an undetermined vehicle sub-type as <code>Vehicle</code>
+        </label>
+
+        <div class="buttons">
+            <button type="submit" class="primary">Save settings</button>
+            <button type="button" id="reloadSettings">Discard changes</button>
+        </div>
+        <p class="result" id="settingsResult"></p>
+    </form>
+</section>
+
 <div class="two-col">
     <section class="panel">
-        <h2>Zones</h2>
-        <ul id="zoneList" class="zonelist"><li class="empty">loading&hellip;</li></ul>
+        <h2>Test events <span class="hint">flagged test=true</span></h2>
         <p class="note">
-            Zone editing arrives with the configuration UI. Until then the application writes a
-            default centred rectangle to <code>localdata/zones.json</code> on first run.
+            Wire and prove a VMS rule with nothing in the scene. Each travels the same path a
+            genuine dwell event takes.
         </p>
+        <div class="buttons">
+            <button type="button" data-kind="entered">Test Enter</button>
+            <button type="button" data-kind="exited">Test Exit</button>
+            <button type="button" data-kind="threshold">Test Threshold</button>
+        </div>
+        <p class="result" id="testResult"></p>
     </section>
 
     <section class="panel">
@@ -48,20 +142,6 @@
         <dl id="health" class="counters"></dl>
     </section>
 </div>
-
-<section class="panel">
-    <h2>Test events <span class="hint">fires a real event and MQTT record flagged test=true</span></h2>
-    <p class="note">
-        Use these to wire and prove a VMS rule with nothing in the scene. Each one travels the same
-        path a genuine dwell event takes.
-    </p>
-    <div class="buttons">
-        <button type="button" data-kind="entered">Test Enter</button>
-        <button type="button" data-kind="exited">Test Exit</button>
-        <button type="button" data-kind="threshold">Test Threshold Exceeded</button>
-    </div>
-    <p class="result" id="testResult"></p>
-</section>
 
 <section class="panel">
     <h2>Object classes seen <span class="hint">what this camera actually emits</span></h2>
