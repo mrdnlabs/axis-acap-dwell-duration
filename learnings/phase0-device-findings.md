@@ -212,6 +212,28 @@ Confirms, on our own events rather than by analogy with someone else's:
 - The bridge's own `timestamp` is epoch-ms, so the ISO-8601 `utcTime` data field is what carries
   IF-4's NTP-synced UTC.
 
+## Testing an overlay: the JPEG snapshot will not show it
+
+`/axis-cgi/jpg/image.cgi` opens its **own** VDO stream, so an overlay attached to some other
+stream is simply not in that image. Grabbing a snapshot is the obvious way to check an overlay and
+it produces a convincing-looking negative result.
+
+An overlay also cannot be created until a stream exists to attach to — on an idle camera there may
+be none, and `axo_start()` succeeding tells you nothing about whether anything was drawn.
+
+What actually works:
+
+```bash
+# hold a stream open, which is what triggers OVERLAY_CREATED
+curl -s --anyauth -u root:PASS "http://<ip>/axis-cgi/mjpg/video.cgi?resolution=1280x720&fps=5" -o stream.mjpg &
+sleep 10
+# then pull a frame out of that same stream — JPEG frames are FFD8...FFD9
+```
+
+Watch the log for `OVERLAY_CREATED stream=<id>` before concluding anything. Rendering to a stream
+nobody is watching is also why the VDO `"filter": "overlay"` map matters — it keeps the app from
+drawing for streams that will never display it.
+
 ## AXParameter callbacks deadlock if you read a parameter inside them
 
 Calling `ax_parameter_get()` from inside an `ax_parameter_register_callback` handler **deadlocks

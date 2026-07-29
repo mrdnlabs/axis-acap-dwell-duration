@@ -569,6 +569,52 @@ char* tracker_status_json(tracker_t* t) {
     return out;
 }
 
+int tracker_labels(tracker_t* t, dwell_label_t* out, int max) {
+    int            n = 0;
+    GHashTableIter iter;
+    gpointer       key, value;
+
+    g_hash_table_iter_init(&iter, t->tracks);
+    while (g_hash_table_iter_next(&iter, &key, &value) && n < max) {
+        const track_t* tr = value;
+
+        for (int zi = 0; zi < t->zones.n_zones && n < max; zi++) {
+            const zstate_t* zs = &tr->z[zi];
+            if (zs->state != DW_IN && zs->state != DW_PENDING_OUT) {
+                continue;
+            }
+
+            const double e     = elapsed_of(t, zs);
+            const int    total = (int)e;
+            const double over  = overage_of(t, zs);
+
+            out[n].x    = tr->last_ref.x;
+            out[n].y    = tr->last_ref.y;
+            out[n].over = zs->threshold_fired;
+
+            if (zs->threshold_fired) {
+                g_snprintf(out[n].text,
+                           sizeof(out[n].text),
+                           "%s %d:%02d  +%d:%02d",
+                           tr->best_class[0] ? tr->best_class : "Object",
+                           total / 60,
+                           total % 60,
+                           (int)over / 60,
+                           (int)over % 60);
+            } else {
+                g_snprintf(out[n].text,
+                           sizeof(out[n].text),
+                           "%s %d:%02d",
+                           tr->best_class[0] ? tr->best_class : "Object",
+                           total / 60,
+                           total % 60);
+            }
+            n++;
+        }
+    }
+    return n;
+}
+
 guint tracker_in_zone_count(tracker_t* t) {
     guint          n = 0;
     GHashTableIter iter;

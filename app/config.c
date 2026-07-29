@@ -31,7 +31,9 @@ static const char* const PARAM_NAMES[] = {"ObjectTypes",
                                           "UpdateInterval",
                                           "DwellThreshold",
                                           "OcclusionMaxGap",
-                                          "StationaryHold"};
+                                          "StationaryHold",
+                                          "MqttAutoConfigure",
+                                          "OverlayEnabled"};
 
 static AXParameter*      handle     = NULL;
 static config_changed_fn change_cb  = NULL;
@@ -148,6 +150,9 @@ bool config_reload(config_t* cfg) {
     cfg->occlusion_max_gap_s =
         param_double("OcclusionMaxGap", cfg->occlusion_max_gap_s, 0.0, 3600.0);
     cfg->stationary_hold_s = param_double("StationaryHold", cfg->stationary_hold_s, 0.0, 86400.0);
+
+    cfg->mqtt_auto_configure = param_bool("MqttAutoConfigure", cfg->mqtt_auto_configure);
+    cfg->overlay_enabled     = param_bool("OverlayEnabled", cfg->overlay_enabled);
 
     return true;
 }
@@ -268,6 +273,8 @@ char* config_to_json(const config_t* cfg) {
     json_object_set_new(o, "dwellThreshold", json_real(cfg->threshold_s));
     json_object_set_new(o, "occlusionMaxGap", json_real(cfg->occlusion_max_gap_s));
     json_object_set_new(o, "stationaryHold", json_real(cfg->stationary_hold_s));
+    json_object_set_new(o, "mqttAutoConfigure", json_boolean(cfg->mqtt_auto_configure));
+    json_object_set_new(o, "overlayEnabled", json_boolean(cfg->overlay_enabled));
 
     char* text = json_dumps(o, JSON_COMPACT | JSON_REAL_PRECISION(4));
     json_decref(o);
@@ -367,15 +374,26 @@ char* config_apply_json(const char* json) {
         }
     }
 
-    json_t* fb = json_object_get(root, "fallbackToVehicle");
-    if (!error && fb) {
-        if (!json_is_boolean(fb)) {
-            error = g_strdup("fallbackToVehicle must be true or false");
-        } else {
-            g_hash_table_replace(staged,
-                                 g_strdup("FallbackToVehicle"),
-                                 g_strdup(json_is_true(fb) ? "yes" : "no"));
+    static const struct {
+        const char* key;
+        const char* param;
+    } booleans[] = {
+        {"fallbackToVehicle", "FallbackToVehicle"},
+        {"mqttAutoConfigure", "MqttAutoConfigure"},
+        {"overlayEnabled", "OverlayEnabled"},
+    };
+    for (size_t i = 0; !error && i < G_N_ELEMENTS(booleans); i++) {
+        json_t* b = json_object_get(root, booleans[i].key);
+        if (!b) {
+            continue;
         }
+        if (!json_is_boolean(b)) {
+            error = g_strdup_printf("%s must be true or false", booleans[i].key);
+            break;
+        }
+        g_hash_table_replace(staged,
+                             g_strdup(booleans[i].param),
+                             g_strdup(json_is_true(b) ? "yes" : "no"));
     }
 
     static const struct {

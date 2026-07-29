@@ -61,6 +61,13 @@ typedef struct {
     double stationary_window_s;
 
     double max_clock_step_s;
+
+    /* Let the app configure the device's MQTT event bridge for its own events.
+     * Writes are read-merge-write, so operator filters are never disturbed. */
+    bool mqtt_auto_configure;
+
+    /* Draw zones and elapsed times onto the video stream. */
+    bool overlay_enabled;
 } config_t;
 
 /** One detection lifted out of a metadata frame. */

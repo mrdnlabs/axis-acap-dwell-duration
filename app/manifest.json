@@ -33,7 +33,9 @@
                 { "name": "UpdateInterval", "default": "10.0", "type": "string" },
                 { "name": "DwellThreshold", "default": "100.0", "type": "string" },
                 { "name": "OcclusionMaxGap", "default": "60.0", "type": "string" },
-                { "name": "StationaryHold", "default": "300.0", "type": "string" }
+                { "name": "StationaryHold", "default": "300.0", "type": "string" },
+                { "name": "MqttAutoConfigure", "default": "yes", "type": "bool:no,yes" },
+                { "name": "OverlayEnabled", "default": "no", "type": "bool:no,yes" }
             ],
             "reverseProxy": [
                 {
@@ -52,6 +54,15 @@
     "resources": {
         "deviceDataHub": {
             "enabled": true
+        },
+        "dbus": {
+            "requiredMethods": [
+                "com.axis.HTTPConf1.VAPIXServiceAccounts1.GetCredentials"
+            ]
+        },
+        "overlay": {
+            "enabled": true,
+            "required": false
         }
     }
 }

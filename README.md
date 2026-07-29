@@ -3,10 +3,11 @@
 An AXIS ACAP that measures how long selected object types stay inside user-drawn zones and emits
 enter / exit / dwell / threshold events to the camera event system and MQTT.
 
-> **Status: Phase 2. Configurable and working; no video overlay yet.**
-> Zones are drawn in the browser, settings apply live without a restart, and enter / exit /
-> threshold / dwell events reach the camera event system and MQTT. See
-> [Project status](#project-status).
+> **Status: feature complete for v0.1, pending package signing.**
+> Zones are drawn in the browser, settings apply live, enter / exit / threshold / dwell events
+> reach the camera event system and MQTT with per-zone topics, and an optional overlay draws zones
+> and running timers onto the video. See [Project status](#project-status) for what is verified and
+> what still needs a real scene.
 
 ## How it works
 
@@ -203,21 +204,70 @@ Two defaults deserve explanation:
 | **0 — Design spike** | **Done.** Metadata consumption, coordinate frame, class behaviour, track continuity, MQTT topic and payload format all measured on hardware. |
 | **1 — Zones, timers, events** | **Done.** Point-in-polygon, per-object state machine, AXEvent output, status and health endpoints, test triggers. 60 unit tests pass; the event path is verified end-to-end to a live broker. |
 | **2 — Config UI** | **Done.** Multi-zone drawing on a live snapshot, AXParameter-backed settings that apply without a restart, server-side validation, zone persistence. |
-| 3 — MQTT | Not started. Bridge auto-configuration, copy-able resolved topics. |
-| 4 — Overlay | Not started. |
-| 5 — Hardening | Not started. Security audit, signing, release audit. |
+| **3 — MQTT** | **Done.** Bridge auto-configuration (read-merge-write, idempotent), resolved topic strings with copy buttons, sample payload. |
+| **4 — Overlay** | **Done.** Zone outlines and per-object running timers via axoverlay2 + Cairo, off by default. |
+| **5 — Hardening** | **Done except signing.** Security audit applied, docs complete. Package is still unsigned — see [Known limitations](#known-limitations). |
 
-**Verified:** the event and MQTT path end-to-end (AC-5, via the test triggers), and the timing
-rules by unit test — enter/exit debounce, total dwell, threshold and overage, independent
-per-object timers, `Rename` continuity, late-classification backdating, gap budgets, and the clock
-guard.
+### Verified on hardware
 
-**Not yet verified on hardware:** AC-1 to AC-4, AC-6 and AC-7 with real objects, because the test
-camera views an indoor office. The logic behind each is unit-tested; what is missing is a scene.
+- **AC-5** — test triggers emit real events that reach a live broker, flagged `test=true`.
+- **AC-7** — AOA keeps running alongside; the app claims no DeepLearningProcessor, links no Larod,
+  and the device log shows no `custodio` / OOM / `larod` entries.
+- **MQTT topics** — the strings the UI offers for copy were diffed byte-for-byte against what a
+  broker actually received. They match.
+- **MQTT merge safety** — with an unrelated operator filter pre-seeded, configuring twice leaves
+  our filter present exactly once and the operator's untouched; disabling removes only ours.
+- **Settings and zones** — round-trip, persist across restart, apply live (including changes made
+  externally through `param.cgi`), and reject out-of-range values, unknown classes, attribute
+  classes, duplicate zone ids and degenerate polygons.
+- **Overlay** — zone polygons render on the video stream at the correct geometry, which also
+  confirms the coordinate frame visually.
+
+### Verified by test, not yet by a real scene
+
+The timing rules are covered by 60 host tests: enter/exit debounce, total dwell, threshold and
+overage, independent per-object timers, `Rename` continuity, late-classification backdating, gap
+budgets, and the clock guard.
+
+**AC-1 to AC-4 and AC-6 have not been exercised with real objects** — the test camera views an
+indoor office, so no truck has ever entered a zone. The logic is tested; what is missing is a
+scene.
+
+## MQTT
+
+The application never holds broker credentials. It declares AXEvents and asks the device's own
+MQTT client to publish them, so the operator's broker host, TLS and credentials are used as
+configured. Enable the device MQTT client first, under **System > MQTT**.
+
+With `mqttAutoConfigure` on (the default) the app keeps its own event filter in the device's
+publication config. Writes are **read-merge-write**: `configureEventPublication` replaces the
+entire filter list, so posting only our filters would delete every filter the operator had. The
+app reads the current list, drops its own previous entry, appends one, and preserves everything
+else. Running it repeatedly changes nothing.
+
+Device-global settings — `customTopicPrefix`, `appendEventTopic`, `includeTopicNamespaces` — are
+read, never written. They affect every other event the operator publishes.
+
+The app's page shows the resolved topic for each event and zone with a copy button, a wildcard
+subscribe string, and a sample payload. Same data at `GET api/mqtt`.
+
+## Overlay
+
+Optional, off by default. Draws zone outlines and a running timer per dwelling object, turning red
+past the threshold. Uses axoverlay2 with Cairo — GPU/CPU only, no DLPU, so it cannot contend with
+AOA. It attaches per video stream and detaches when the stream closes.
+
+> Testing note: `/axis-cgi/jpg/image.cgi` opens its **own** stream and will not show the overlay.
+> Hold a stream open and pull a frame from that same stream instead, and wait for
+> `OVERLAY_CREATED` in the log before concluding anything.
 
 ## Known limitations
 
-- **Not a dwell timer yet.** No zones, no timers, no events. See the phase table above.
+- **The package is unsigned.** Installing needs `AllowUnsigned=true`, which lowers a device
+  security control. Signing requires an Axis developer account and the ACAP signing service, plus
+  a real assigned `vendorId` in place of the current placeholder. Do both before any production
+  deployment, and turn `AllowUnsigned` back off.
+- **AC-1 to AC-4 and AC-6 are untested against real objects.** See the status section.
 - **The SDK version must match the target firmware.** The Device Data Hub C API changed between
   SDK 12.10 and 12.11 (`DHClientError`→`DHError`, listener objects→callback setters, `DHFilter`
   introduced). Code written against one will not compile against the other, and the published

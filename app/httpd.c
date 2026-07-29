@@ -34,6 +34,7 @@ static const char* endpoint_for(const char* path) {
         {"/api/zones", "zones"},
         {"/api/test", "test"},
         {"/api/config", "config"},
+        {"/api/mqtt", "mqtt"},
     };
 
     for (size_t i = 0; i < G_N_ELEMENTS(routes); i++) {
@@ -90,7 +91,12 @@ static gboolean on_incoming(GSocketService* svc,
 
     /* Read until the header terminator is in hand, then read exactly as many
      * body bytes as Content-Length declares. A single read is not enough — a
-     * PUT of zone polygons arrives across several packets. */
+     * PUT of zone polygons arrives across several packets.
+     *
+     * Static rather than on the stack because it is 64 KiB. That is safe only
+     * because GSocketService dispatches "incoming" on the main loop thread, so
+     * requests are handled one at a time. If this server ever becomes
+     * threaded, this buffer must move into the connection. */
     static char buf[MAX_REQUEST + 1];
     gsize       have       = 0;
     gssize      header_end = -1;

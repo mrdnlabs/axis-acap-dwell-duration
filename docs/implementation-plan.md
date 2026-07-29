@@ -312,9 +312,9 @@ threshold. GPU/CPU only, no DLPU. Doubles as the OQ-2 verification tool.
 | **0** | **Done** | DDH subscribe + track statistics + status page + build/deploy + MQTT plumbing. OQ-1, OQ-2, IF-2 resolved on hardware. |
 | **1** | **Done** | `zone` + `tracker` + `events` + `httpd` + operator page. 60 host tests pass; AXEvent → MQTT verified end-to-end to a live broker. FR-10 test triggers pulled forward — they were the only way to verify the emit path without an object in frame. |
 | **2** | **Done** | Multi-zone drawing on a snapshot, AXParameter-backed settings applying live, validated `PUT /api/config` and `/api/zones`, event re-declaration on zone change. FR-11. **[verified]** Per-zone MQTT topics confirmed with two zones: `…/Entered/$source/zone/1` and `…/ThresholdExceeded/$source/zone/2`. |
-| 3 | Not started | MQTT bridge auto-config, resolved-topic panel, `/api/mqtt`. IF-2. |
-| 4 | Not started | Overlay. FR-12. |
-| 5 | Not started | Security audit, signing, release audit. |
+| **3** | **Done** | MQTT bridge auto-config via D-Bus `GetCredentials` + loopback VAPIX, read-merge-write, resolved-topic panel with copy buttons, `GET`/`POST /api/mqtt`. IF-2. **[verified]** Resolver output diffed byte-for-byte against a live broker — identical. Merge safety proven with a pre-seeded operator filter. |
+| **4** | **Done** | axoverlay2 + Cairo overlay, zone outlines and per-object timers, off by default. FR-12. **[verified]** Rendered on stream and captured, which also confirms the coordinate frame visually. |
+| **5** | **Done except signing** | Security audit applied (buffer-size guard on the overlay submit path, single-threaded assumption documented, credentials zeroed on release), docs and learnings complete. Signing needs an Axis developer account and a real `vendorId`. |
 
 ## Verification
 

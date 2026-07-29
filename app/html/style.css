@@ -232,6 +232,72 @@ code {
     border-radius: 4px;
 }
 
+/* --- MQTT panel --- */
+.sub {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    font-weight: 640;
+    margin: 20px 0 8px;
+}
+.sub .hint { text-transform: none; letter-spacing: 0; font-size: 12px; }
+
+.mqtt-status { font-size: 13.5px; margin: 0 0 12px; color: var(--muted); }
+.mqtt-status.good { color: var(--ok); }
+.mqtt-status.warn { color: var(--wait); }
+.mqtt-status.bad { color: var(--bad); }
+
+.copyrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--line);
+}
+.copyrow:last-child { border-bottom: none; }
+.copyrow code {
+    flex: 1 1 auto;
+    min-width: 0;
+    background: var(--chip);
+    padding: 6px 9px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+.copyrow code.wrap { white-space: normal; overflow-wrap: anywhere; }
+
+.topic-label {
+    flex: 0 0 150px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    font-size: 12.5px;
+}
+.topic-event { font-weight: 620; }
+.topic-zone { color: var(--muted); font-size: 11.5px; }
+
+button.copy {
+    flex: 0 0 auto;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 560;
+    padding: 5px 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--muted);
+    cursor: pointer;
+}
+button.copy:hover { border-color: var(--accent); color: var(--accent); }
+
+@media (max-width: 720px) {
+    .copyrow { flex-wrap: wrap; }
+    .topic-label { flex-basis: 100%; flex-direction: row; gap: 8px; }
+}
+
 /* --- zone editor --- */
 .zone-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
 .tab {

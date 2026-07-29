@@ -59,6 +59,16 @@ void tracker_set_config(tracker_t* t, const config_t* cfg);
  */
 void tracker_set_zones(tracker_t* t, const zone_set_t* zones);
 
+/** A label to draw on the video stream for one dwelling object. */
+typedef struct {
+    double x, y; /* normalized position of the object's reference point */
+    char   text[64];
+    bool   over; /* past the dwell threshold */
+} dwell_label_t;
+
+/** Fill `out` with one label per dwelling object. Returns how many were written. */
+int tracker_labels(tracker_t* t, dwell_label_t* out, int max);
+
 /** Current in-zone objects as a JSON array. Caller frees with g_free(). */
 char* tracker_status_json(tracker_t* t);
 

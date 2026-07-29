@@ -44,6 +44,9 @@ void config_set_defaults(config_t* cfg) {
     cfg->stationary_window_s = 3.0;
 
     cfg->max_clock_step_s = 5.0;
+
+    cfg->mqtt_auto_configure = true;
+    cfg->overlay_enabled     = false;
 }
 
 void zone_set_defaults(zone_set_t* zs) {

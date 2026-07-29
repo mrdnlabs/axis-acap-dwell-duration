@@ -39,6 +39,8 @@
 #include "dwell.h"
 #include "events.h"
 #include "httpd.h"
+#include "mqtt_bridge.h"
+#include "overlay.h"
 #include "tracker.h"
 #include "zone.h"
 
@@ -416,11 +418,42 @@ static void on_config_changed(void* user) {
     g_mutex_unlock(&state.lock);
 
     syslog(LOG_INFO,
-           "CONFIG_APPLIED types=%d threshold_s=%.1f enter_s=%.2f exit_s=%.2f",
+           "CONFIG_APPLIED types=%d threshold_s=%.1f enter_s=%.2f exit_s=%.2f overlay=%s",
            state.cfg.n_types,
            state.cfg.threshold_s,
            state.cfg.enter_debounce_s,
-           state.cfg.exit_debounce_s);
+           state.cfg.exit_debounce_s,
+           state.cfg.overlay_enabled ? "on" : "off");
+
+    /* Attach and detach from the video system on demand, so an operator who
+     * leaves the overlay off pays nothing for it. */
+    if (state.cfg.overlay_enabled && !overlay_is_running()) {
+        overlay_start();
+    } else if (!state.cfg.overlay_enabled && overlay_is_running()) {
+        overlay_stop();
+    }
+}
+
+/** Push the current zones and dwell labels to the overlay renderer. */
+static gboolean on_overlay_tick(gpointer user_data) {
+    (void)user_data;
+
+    if (!overlay_is_running()) {
+        return G_SOURCE_CONTINUE;
+    }
+
+    dwell_label_t labels[OVERLAY_MAX_LABELS];
+    zone_set_t    zones;
+    int           n;
+
+    g_mutex_lock(&state.lock);
+    zones = state.zones;
+    n     = tracker_labels(state.tracker, labels, OVERLAY_MAX_LABELS);
+    g_mutex_unlock(&state.lock);
+
+    /* Called with no lock held — overlay_set_model takes its own. */
+    overlay_set_model(&zones, labels, n);
+    return G_SOURCE_CONTINUE;
 }
 
 static char* handle_config(const char* method, const char* body) {
@@ -518,6 +551,31 @@ static char* http_body(const char* endpoint,
 
     if (strcmp(endpoint, "zones") == 0) {
         return handle_zones(method, body);
+    }
+
+    if (strcmp(endpoint, "mqtt") == 0) {
+        /* Snapshot the zones, then talk to VAPIX with no lock held. */
+        g_mutex_lock(&state.lock);
+        zone_set_t zones = state.zones;
+        g_mutex_unlock(&state.lock);
+
+        if (strcmp(method, "GET") == 0) {
+            return mqtt_bridge_state_json(&zones);
+        }
+
+        char*      enable_arg = query_value(query, "enable");
+        const bool enable     = !enable_arg || strcmp(enable_arg, "false") != 0;
+        g_free(enable_arg);
+
+        char* err = mqtt_bridge_configure(enable);
+        if (err) {
+            char* quoted = json_quoted(err);
+            char* out    = g_strdup_printf("{\"error\":%s}", quoted);
+            g_free(quoted);
+            g_free(err);
+            return out;
+        }
+        return mqtt_bridge_state_json(&zones);
     }
 
     if (strcmp(endpoint, "status") == 0) {
@@ -794,7 +852,9 @@ static void cleanup_resources(void) {
         client = NULL;
     }
 
+    overlay_stop();
     events_shutdown();
+    mqtt_bridge_shutdown();
     config_shutdown();
 
     if (state.tracker) {
@@ -838,6 +898,16 @@ int main(void) {
         syslog(LOG_WARNING, "EVENT_INIT incomplete — dwell records may not reach the VMS");
     }
 
+    if (mqtt_bridge_init() && state.cfg.mqtt_auto_configure) {
+        /* Read-merge-write: existing operator filters are preserved, and
+         * running this repeatedly does not accumulate duplicates. */
+        char* err = mqtt_bridge_configure(true);
+        if (err) {
+            syslog(LOG_WARNING, "MQTT_AUTOCONFIG_FAILED msg=%s", err);
+            g_free(err);
+        }
+    }
+
     main_loop = g_main_loop_new(NULL, FALSE);
     g_unix_signal_add(SIGTERM, on_signal, NULL);
     g_unix_signal_add(SIGINT, on_signal, NULL);
@@ -865,7 +935,12 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
+    if (state.cfg.overlay_enabled) {
+        overlay_start();
+    }
+
     g_timeout_add_seconds(SUMMARY_EVERY_S, on_summary_timer, NULL);
+    g_timeout_add(500, on_overlay_tick, NULL);
 
     g_main_loop_run(main_loop);
 

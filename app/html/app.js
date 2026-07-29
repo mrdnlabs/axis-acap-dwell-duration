@@ -343,6 +343,8 @@ function fillSettings(cfg) {
     form.elements.occlusionMaxGap.value = cfg.occlusionMaxGap;
     form.elements.stationaryHold.value = cfg.stationaryHold;
     form.elements.fallbackToVehicle.checked = !!cfg.fallbackToVehicle;
+    form.elements.overlayEnabled.checked = !!cfg.overlayEnabled;
+    form.elements.mqttAutoConfigure.checked = !!cfg.mqttAutoConfigure;
 }
 
 async function loadSettings() {
@@ -376,7 +378,9 @@ form.addEventListener('submit', async (ev) => {
         exitDebounce: parseFloat(form.elements.exitDebounce.value),
         occlusionMaxGap: parseFloat(form.elements.occlusionMaxGap.value),
         stationaryHold: parseFloat(form.elements.stationaryHold.value),
-        fallbackToVehicle: form.elements.fallbackToVehicle.checked
+        fallbackToVehicle: form.elements.fallbackToVehicle.checked,
+        overlayEnabled: form.elements.overlayEnabled.checked,
+        mqttAutoConfigure: form.elements.mqttAutoConfigure.checked
     };
 
     setResult('settingsResult', 'saving…', '');
@@ -549,6 +553,125 @@ async function poll() {
     }
 }
 
+/* --------------------------------------------------------------------- MQTT */
+
+function renderMqtt(m) {
+    const status = document.getElementById('mqttStatus');
+    if (!m.available) {
+        status.textContent =
+            'Cannot reach the MQTT configuration — the application has no VAPIX credentials.';
+        status.className = 'mqtt-status bad';
+    } else if (!m.clientActive) {
+        status.textContent =
+            'The device MQTT client is not enabled. Configure and enable it under System > MQTT, '
+            + 'then return here.';
+        status.className = 'mqtt-status warn';
+    } else if (!m.clientConnected) {
+        status.textContent = 'The device MQTT client is enabled but not connected to its broker.';
+        status.className = 'mqtt-status warn';
+    } else {
+        const extra = m.otherFilters
+            ? ` ${m.otherFilters} other event filter${m.otherFilters === 1 ? '' : 's'} left untouched.`
+            : '';
+        status.textContent = m.configured
+            ? 'Connected, and this application’s events are being published.' + extra
+            : 'Connected, but this application’s events are not published yet.' + extra;
+        status.className = 'mqtt-status ' + (m.configured ? 'good' : 'warn');
+    }
+
+    document.getElementById('mqttWildcard').textContent = m.wildcard || '—';
+    document.getElementById('mqttSample').textContent = m.samplePayload || '—';
+
+    replaceChildren(
+        document.getElementById('mqttTopics'),
+        (m.topics || []).map((t, i) => {
+            const row = el('div', 'copyrow');
+            const label = el('span', 'topic-label');
+            label.appendChild(el('span', 'topic-event', t.event));
+            label.appendChild(el('span', 'topic-zone', t.zoneName || ('Zone ' + t.zoneId)));
+            row.appendChild(label);
+
+            const code = el('code', 'wrap', t.topic);
+            code.id = 'mqttTopic' + i;
+            row.appendChild(code);
+
+            const btn = el('button', 'copy', 'Copy');
+            btn.type = 'button';
+            btn.dataset.copy = code.id;
+            row.appendChild(btn);
+            return row;
+        })
+    );
+}
+
+async function loadMqtt() {
+    try {
+        const res = await fetch('api/mqtt', { credentials: 'same-origin', cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        renderMqtt(await res.json());
+    } catch (err) {
+        const status = document.getElementById('mqttStatus');
+        status.textContent = 'Could not read MQTT state: ' + (err.message || err);
+        status.className = 'mqtt-status bad';
+    }
+}
+
+async function configureMqtt(enable, button) {
+    button.disabled = true;
+    setResult('mqttResult', enable ? 'configuring…' : 'removing…', '');
+    try {
+        const res = await fetch('api/mqtt?enable=' + (enable ? 'true' : 'false'), {
+            method: 'POST',
+            credentials: 'same-origin'
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            setResult('mqttResult', data.error || ('HTTP ' + res.status), 'bad');
+            return;
+        }
+        renderMqtt(data);
+        setResult('mqttResult',
+                  enable ? 'Bridge configured. Existing filters were preserved.'
+                         : 'Our filters removed. Everything else was left in place.',
+                  'good');
+    } catch (err) {
+        setResult('mqttResult', 'Failed: ' + (err.message || err), 'bad');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+document.getElementById('mqttEnable')
+    .addEventListener('click', (e) => configureMqtt(true, e.currentTarget));
+document.getElementById('mqttDisable')
+    .addEventListener('click', (e) => configureMqtt(false, e.currentTarget));
+
+/* Copy buttons. Delegated, because topic rows are rebuilt on every refresh. */
+document.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('.copy');
+    if (!btn) return;
+
+    const source = document.getElementById(btn.dataset.copy);
+    if (!source) return;
+
+    const text = source.textContent;
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch (err) {
+        /* Clipboard access needs a secure context; the device may be on plain
+         * HTTP. Fall back to selecting the text so it can still be copied. */
+        const range = document.createRange();
+        range.selectNodeContents(source);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+
+    const original = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = original; }, 1200);
+});
+
 /* ------------------------------------------------------------- test buttons */
 
 async function fireTest(kind, button) {
@@ -582,6 +705,9 @@ document.querySelectorAll('[data-kind]').forEach((b) => {
 /* -------------------------------------------------------------------- boot */
 
 loadSettings();
+loadMqtt();
 poll();
 setInterval(poll, POLL_MS);
 setInterval(renderObjects, TICK_MS);
+/* MQTT state involves several VAPIX round trips — poll it far less often. */
+setInterval(loadMqtt, 30000);

@@ -114,6 +114,16 @@
             Count an undetermined vehicle sub-type as <code>Vehicle</code>
         </label>
 
+        <label class="inline">
+            <input type="checkbox" name="overlayEnabled">
+            Draw zones and elapsed times on the video stream
+        </label>
+
+        <label class="inline">
+            <input type="checkbox" name="mqttAutoConfigure">
+            Keep the device MQTT bridge configured to publish these events
+        </label>
+
         <div class="buttons">
             <button type="submit" class="primary">Save settings</button>
             <button type="button" id="reloadSettings">Discard changes</button>
@@ -142,6 +152,37 @@
         <dl id="health" class="counters"></dl>
     </section>
 </div>
+
+<section class="panel">
+    <h2>MQTT <span class="hint">the hand-off surface for a VMS</span></h2>
+
+    <p class="mqtt-status" id="mqttStatus">checking&hellip;</p>
+
+    <div class="buttons">
+        <button type="button" id="mqttEnable" class="primary">Configure MQTT bridge</button>
+        <button type="button" id="mqttDisable">Remove our filters</button>
+    </div>
+    <p class="result" id="mqttResult"></p>
+
+    <p class="note">
+        The application never stores broker credentials &mdash; it asks the device's own MQTT
+        client to publish its events. Writes preserve every filter the operator already had.
+    </p>
+
+    <h3 class="sub">Subscribe to everything this app publishes</h3>
+    <div class="copyrow"><code id="mqttWildcard">&mdash;</code><button type="button" class="copy" data-copy="mqttWildcard">Copy</button></div>
+
+    <h3 class="sub">Per-event topics <span class="hint">zone is in the path, so a VMS can subscribe to one zone</span></h3>
+    <div id="mqttTopics" class="topiclist"></div>
+
+    <h3 class="sub">Sample payload</h3>
+    <div class="copyrow"><code id="mqttSample" class="wrap">&mdash;</code><button type="button" class="copy" data-copy="mqttSample">Copy</button></div>
+    <p class="note">
+        The bridge stringifies every value &mdash; booleans arrive as <code>"1"</code>/<code>"0"</code>
+        and numbers as <code>"112.000000"</code>. Its own <code>timestamp</code> is epoch
+        milliseconds; <code>utcTime</code> carries ISO-8601 UTC from the camera's NTP-synced clock.
+    </p>
+</section>
 
 <section class="panel">
     <h2>Object classes seen <span class="hint">what this camera actually emits</span></h2>
