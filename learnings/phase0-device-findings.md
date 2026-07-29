@@ -383,6 +383,27 @@ Two findings:
 excursion. `enter_debounce` (FR-7) is what suppresses these; without it every flicker would emit
 an `Entered` event.
 
+### Revised after a full day of running
+
+A ~7-hour sample on the same indoor scene: **30,508 frames, 26,057 detections, 385 track ends,
+0 renames**, averaging 1.25 fps.
+
+Two numbers change earlier conclusions:
+
+- **85% of detections carry no class at all** — 22,280 of 26,057, against the ~10% seen in the
+  first few minutes. Only `Human` (3,078) and `Head` (699) were ever classified. So an
+  unclassified detection is the *normal* case on this scene, not an edge case. The EC-5 class-grace
+  design (record `first_inside` regardless of class, backdate entry when a class finally arrives)
+  matters far more than the short sample suggested, and a high `minScore` would discard most of
+  what the camera reports.
+- **`Rename` was emitted zero times across 385 completed tracks.** The short run showed the same,
+  but at this volume it is conclusive: on this device re-association shows up as a reused
+  `object_track_id`, never as a `Rename` event. Handle `Rename` when it appears, but nothing may
+  depend on it.
+
+**OQ-3 remains unanswered even at this volume** — 26k detections produced no vehicle class of any
+kind. An indoor scene simply cannot answer it; it needs vehicles in view.
+
 ## Load (NFR-4 / AC-7 early read)
 
 `fps=3.78` with a person moving in frame, `0.53` with an empty scene. The frame topic is
