@@ -1,0 +1,27 @@
+# Device credentials — MUST never be committed
+.env.devices
+.env
+*.pem
+*.key
+
+# Build output
+build/
+debug/
+*.eap
+*_LICENSE.txt
+package.conf
+package.conf.orig
+param.conf
+tmp*
+
+# Object files / binaries
+*.o
+*.so
+app/object_dwell_timer
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

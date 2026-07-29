@@ -1,0 +1,29 @@
+{
+    "schemaVersion": "2.2.0",
+    "acapPackageConf": {
+        "setup": {
+            "appName": "object_dwell_timer",
+            "friendlyName": "Object Dwell Timer",
+            "vendor": "MRDN Labs",
+            "vendorUrl": "https://github.com/mrdnlabs",
+            "vendorId": "4D52444E4C",
+            "runMode": "respawn",
+            "version": "0.1.0",
+            "architecture": "aarch64",
+            "compatibleOsVersions": [
+                {
+                    "min": "12.11.72",
+                    "max": "13"
+                }
+            ]
+        },
+        "configuration": {
+            "settingPage": "index.html"
+        }
+    },
+    "resources": {
+        "deviceDataHub": {
+            "enabled": true
+        }
+    }
+}

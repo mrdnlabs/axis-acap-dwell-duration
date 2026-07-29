@@ -1,0 +1,9 @@
+# Normalise line endings. Developed on Windows, built in a Linux container and
+# run on an embedded Linux device — CRLF leaking into the package causes
+# confusing failures in shell scripts and manifest tooling.
+* text=auto eol=lf
+
+# Binary artifacts
+*.eap binary
+*.jpg binary
+*.png binary

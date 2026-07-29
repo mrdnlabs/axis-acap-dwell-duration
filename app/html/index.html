@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Object Dwell Timer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+    <div class="title">
+        <h1>Object Dwell Timer</h1>
+        <span class="ver">v0.1.0 &middot; Phase 0 spike</span>
+    </div>
+    <div class="live">
+        <span id="dot" class="dot"></span>
+        <span id="liveText">connecting&hellip;</span>
+    </div>
+</header>
+
+<p class="lede">
+    This build contains no dwell logic yet. It consumes the camera's scene metadata and reports
+    what the hardware actually does, so the real timer is built on measurements rather than
+    assumptions. Figures below are parsed live from the application log.
+</p>
+
+<section class="cards" id="oqCards"></section>
+
+<section class="panel">
+    <h2>Object classes seen <span class="hint">answers OQ-3 &mdash; which types this camera emits</span></h2>
+    <div id="classes" class="chips"><span class="empty">waiting for detections&hellip;</span></div>
+    <p class="note" id="classNote"></p>
+</section>
+
+<div class="two-col">
+    <section class="panel">
+        <h2>Stationary tracks in view <span class="hint">how long a still object keeps its track &mdash; FR-5 evidence</span></h2>
+        <table id="liveTable">
+            <thead><tr><th>Track</th><th>Age</th><th>Movement</th><th>Class</th></tr></thead>
+            <tbody><tr class="empty-row"><td colspan="4">nothing in view</td></tr></tbody>
+        </table>
+    </section>
+
+    <section class="panel">
+        <h2>Counters</h2>
+        <dl id="counters" class="counters"></dl>
+    </section>
+</div>
+
+<section class="panel">
+    <h2>Ended tracks <span class="hint">max gap shows how long the camera bridges an absence</span></h2>
+    <table id="endedTable">
+        <thead>
+            <tr><th>Track</th><th>Lifetime</th><th>Frames</th><th>Max gap</th><th>Movement</th><th>Class</th></tr>
+        </thead>
+        <tbody><tr class="empty-row"><td colspan="6">no completed tracks yet</td></tr></tbody>
+    </table>
+</section>
+
+<section class="panel">
+    <h2>Device Data Hub topics <span class="hint">answers OQ-1</span></h2>
+    <div id="topics" class="chips mono"><span class="empty">reading&hellip;</span></div>
+</section>
+
+<footer>
+    <span id="stamp">&mdash;</span>
+    <a href="/axis-cgi/admin/systemlog.cgi?appname=object_dwell_timer" target="_blank" rel="noopener">raw application log</a>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

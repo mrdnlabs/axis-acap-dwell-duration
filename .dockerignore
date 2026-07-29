@@ -1,0 +1,18 @@
+# Stale .eap files make acap-build merge their manifest fields into the new
+# package — a documented and very confusing failure mode. Never ship them into
+# the build context.
+*.eap
+build/
+debug/
+
+# Never let credentials enter a build layer
+.env.devices
+.env
+
+.git/
+.gitignore
+.gitattributes
+learnings/
+docs/
+tools/
+README.md
