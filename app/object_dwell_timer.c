@@ -418,8 +418,8 @@ static void on_config_changed(void* user) {
     g_mutex_unlock(&state.lock);
 
     syslog(LOG_INFO,
-           "CONFIG_APPLIED types=%d threshold_s=%.1f enter_s=%.2f exit_s=%.2f overlay=%s",
-           state.cfg.n_types,
+           "CONFIG_APPLIED classes=%d threshold_s=%.1f enter_s=%.2f exit_s=%.2f overlay=%s",
+           state.cfg.n_classes,
            state.cfg.threshold_s,
            state.cfg.enter_debounce_s,
            state.cfg.exit_debounce_s,

@@ -4,6 +4,8 @@ An AXIS ACAP that measures how long selected object types stay inside user-drawn
 enter / exit / dwell / threshold events to the camera event system and MQTT.
 
 > **Status: feature complete for v0.1, pending package signing.**
+> Verified end-to-end with real objects on 2026-07-30 — enter, threshold, overage and exit all
+> fired for people walking through a zone, with per-zone class selection and friendly names.
 > Zones are drawn in the browser, settings apply live, enter / exit / threshold / dwell events
 > reach the camera event system and MQTT with per-zone topics, and an optional overlay draws zones
 > and running timers onto the video. See [Project status](#project-status) for what is verified and
@@ -141,8 +143,12 @@ selectable instance in a VMS and puts it in the MQTT topic path:
 axis/<SERIAL>/event/tns:axis/CameraApplicationPlatform/ObjectDwellTimer/Exited/$source/zone/1
 ```
 
-Data fields: `objectId`, `objectType`, `state`, `elapsedSeconds`, `thresholdExceeded`,
-`overageSeconds`, `utcTime`, `test`.
+Data fields: `objectId`, `objectType`, `objectClass`, `zoneName`, `state`, `elapsedSeconds`,
+`thresholdExceeded`, `overageSeconds`, `utcTime`, `test`.
+
+> **`objectType` is the operator-facing name** you set per class (e.g. `Delivery lorry`), and
+> **`objectClass` is the raw class the camera reported** (`Truck`). A VMS rule can match either;
+> match `objectClass` if you want it to survive someone renaming a class.
 
 > **For integrators:** the MQTT bridge stringifies every value — booleans arrive as `"1"`/`"0"` and
 > doubles as `"112.000000"`. The bridge's own `timestamp` is epoch milliseconds; the `utcTime`
@@ -229,9 +235,16 @@ The timing rules are covered by 60 host tests: enter/exit debounce, total dwell,
 overage, independent per-object timers, `Rename` continuity, late-classification backdating, gap
 budgets, and the clock guard.
 
-**AC-1 to AC-4 and AC-6 have not been exercised with real objects** — the test camera views an
-indoor office, so no truck has ever entered a zone. The logic is tested; what is missing is a
-scene.
+**AC-1, AC-3 and AC-4 are now confirmed with real objects.** People walking through a zone produced
+`Entered`, `ThresholdExceeded` at exactly the configured elapsed, `DwellUpdate`, and `Exited`
+carrying the total — reaching a live broker on the per-zone topic, with the friendly class name in
+`objectType` and the raw camera class in `objectClass`.
+
+**Still outstanding:** AC-6 (two objects timed simultaneously) and AC-2 (a genuinely stationary
+object held for minutes) have not been seen in this scene, and no vehicle class has ever appeared,
+so vehicle sub-types remain unverified. There is also a known behaviour issue: a person who pauses
+is classified stationary, so their `Exited` event is delayed by the full stationary hold — see
+[learnings](learnings/phase0-device-findings.md).
 
 ## MQTT
 

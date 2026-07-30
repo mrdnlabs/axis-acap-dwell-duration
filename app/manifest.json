@@ -25,6 +25,12 @@
                     "default": "Human,Vehicle,Car,Truck,Bus,Bike,VehicleOther",
                     "type": "string"
                 },
+                {
+                    "name": "ObjectTypeNames",
+                    "default": "Human=Person;Vehicle=Unknown vehicle;VehicleOther=Other vehicle",
+                    "type": "string"
+                },
+                { "name": "ClassMinScores", "default": "", "type": "string" },
                 { "name": "MinScore", "default": "0.30", "type": "string" },
                 { "name": "FallbackToVehicle", "default": "yes", "type": "bool:no,yes" },
                 { "name": "ReferencePoint", "default": "bottomCenter", "type": "string" },

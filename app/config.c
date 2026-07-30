@@ -16,13 +16,9 @@
 
 #define APP_NAME "object_dwell_timer"
 
-/* Classes this application will count. Head and LicensePlate are excluded by
- * construction — they are attributes of a parent object and carry their own
- * track id, so counting them would time the same object twice. */
-static const char* const KNOWN_CLASSES[] =
-    {"Human", "Vehicle", "Car", "Truck", "Bus", "Bike", "VehicleOther"};
-
 static const char* const PARAM_NAMES[] = {"ObjectTypes",
+                                          "ObjectTypeNames",
+                                          "ClassMinScores",
                                           "MinScore",
                                           "FallbackToVehicle",
                                           "ReferencePoint",
@@ -40,17 +36,15 @@ static config_changed_fn change_cb  = NULL;
 static void*             change_arg = NULL;
 
 bool config_is_known_class(const char* cls) {
-    for (size_t i = 0; i < G_N_ELEMENTS(KNOWN_CLASSES); i++) {
-        if (strcmp(KNOWN_CLASSES[i], cls) == 0) {
-            return true;
-        }
-    }
-    return false;
+    /* The canonical list lives with the defaults, so there is only one place
+     * that decides which classes this application will ever time. */
+    config_t defaults;
+    config_set_defaults(&defaults);
+    return config_find_class(&defaults, cls) != NULL;
 }
 
 /* ------------------------------------------------------------------ reading */
 
-/** Parameter value as a newly allocated string, or NULL. */
 static char* param_get(const char* name) {
     if (!handle) {
         return NULL;
@@ -66,7 +60,6 @@ static char* param_get(const char* name) {
     return value;
 }
 
-/** Read a double, clamped into range; keeps the current value if unparseable. */
 static double param_double(const char* name, double fallback, double lo, double hi) {
     char* raw = param_get(name);
     if (!raw || !*raw) {
@@ -96,23 +89,100 @@ static bool param_bool(const char* name, bool fallback) {
     return v;
 }
 
-/** Parse "Truck,Bus" into the type list, dropping anything unrecognised. */
-static void parse_types(const char* csv, config_t* cfg) {
-    cfg->n_types = 0;
-    if (!csv || !*csv) {
-        return;
-    }
+/**
+ * Rebuild the class table.
+ *
+ * The table always contains every class this application knows about, so the
+ * UI can show them all. Three parameters layer on top of the defaults:
+ * which classes are enabled, an operator-facing name per class, and an
+ * optional per-class confidence floor.
+ */
+static void load_classes(config_t* cfg) {
+    config_t defaults;
+    config_set_defaults(&defaults);
+    memcpy(cfg->classes, defaults.classes, sizeof(cfg->classes));
+    cfg->n_classes = defaults.n_classes;
 
-    char** parts = g_strsplit(csv, ",", MAX_TYPES + 4);
-    for (int i = 0; parts[i] && cfg->n_types < MAX_TYPES; i++) {
-        char* name = g_strstrip(parts[i]);
-        if (!*name || !config_is_known_class(name)) {
-            continue;
+    /* Enabled set: "Truck,Bus". An unreadable or empty value leaves the
+     * defaults alone rather than silently timing nothing. */
+    char* enabled = param_get("ObjectTypes");
+    if (enabled && *enabled) {
+        for (int i = 0; i < cfg->n_classes; i++) {
+            cfg->classes[i].enabled = false;
         }
-        g_strlcpy(cfg->types[cfg->n_types], name, CLASS_LEN);
-        cfg->n_types++;
+        char** parts = g_strsplit(enabled, ",", MAX_CLASSES + 4);
+        int    hits  = 0;
+        for (int i = 0; parts[i]; i++) {
+            char* name = g_strstrip(parts[i]);
+            for (int c = 0; c < cfg->n_classes; c++) {
+                if (strcmp(cfg->classes[c].cls, name) == 0) {
+                    cfg->classes[c].enabled = true;
+                    hits++;
+                }
+            }
+        }
+        g_strfreev(parts);
+
+        if (hits == 0) {
+            syslog(LOG_WARNING,
+                   "PARAM_CLASSES none of the stored classes are recognised; keeping defaults");
+            for (int i = 0; i < cfg->n_classes; i++) {
+                cfg->classes[i].enabled = defaults.classes[i].enabled;
+            }
+        }
     }
-    g_strfreev(parts);
+    g_free(enabled);
+
+    /* Friendly names: "Truck=Delivery lorry;Human=Staff on foot". */
+    char* names = param_get("ObjectTypeNames");
+    if (names && *names) {
+        char** pairs = g_strsplit(names, ";", MAX_CLASSES + 4);
+        for (int i = 0; pairs[i]; i++) {
+            char* eq = strchr(pairs[i], '=');
+            if (!eq) {
+                continue;
+            }
+            *eq = '\0';
+            char* cls   = g_strstrip(pairs[i]);
+            char* label = g_strstrip(eq + 1);
+            if (!*label) {
+                continue;
+            }
+            for (int c = 0; c < cfg->n_classes; c++) {
+                if (strcmp(cfg->classes[c].cls, cls) == 0) {
+                    g_strlcpy(cfg->classes[c].name, label, NAME_LEN);
+                }
+            }
+        }
+        g_strfreev(pairs);
+    }
+    g_free(names);
+
+    /* Per-class confidence floors: "Truck=0.45;Car=0.6". */
+    char* scores = param_get("ClassMinScores");
+    if (scores && *scores) {
+        char** pairs = g_strsplit(scores, ";", MAX_CLASSES + 4);
+        for (int i = 0; pairs[i]; i++) {
+            char* eq = strchr(pairs[i], '=');
+            if (!eq) {
+                continue;
+            }
+            *eq = '\0';
+            char*        cls = g_strstrip(pairs[i]);
+            char*        end = NULL;
+            const double v   = g_ascii_strtod(g_strstrip(eq + 1), &end);
+            if (!end || end == eq + 1) {
+                continue;
+            }
+            for (int c = 0; c < cfg->n_classes; c++) {
+                if (strcmp(cfg->classes[c].cls, cls) == 0) {
+                    cfg->classes[c].min_score = CLAMP(v, 0.0, 1.0);
+                }
+            }
+        }
+        g_strfreev(pairs);
+    }
+    g_free(scores);
 }
 
 bool config_reload(config_t* cfg) {
@@ -120,19 +190,7 @@ bool config_reload(config_t* cfg) {
         return false;
     }
 
-    char* types = param_get("ObjectTypes");
-    parse_types(types, cfg);
-    g_free(types);
-
-    if (cfg->n_types == 0) {
-        /* Never leave the filter empty — that would silently time nothing at
-         * all, which looks identical to a broken metadata subscription. */
-        syslog(LOG_WARNING, "PARAM_TYPES empty or unrecognised; keeping previous selection");
-        config_t defaults;
-        config_set_defaults(&defaults);
-        memcpy(cfg->types, defaults.types, sizeof(cfg->types));
-        cfg->n_types = defaults.n_types;
-    }
+    load_classes(cfg);
 
     cfg->min_score           = param_double("MinScore", cfg->min_score, 0.0, 1.0);
     cfg->fallback_to_vehicle = param_bool("FallbackToVehicle", cfg->fallback_to_vehicle);
@@ -212,7 +270,7 @@ bool config_init(config_t* cfg, config_changed_fn cb, void* user) {
     }
 
     config_reload(cfg);
-    syslog(LOG_INFO, "PARAM_INIT types=%d threshold_s=%.1f", cfg->n_types, cfg->threshold_s);
+    syslog(LOG_INFO, "PARAM_INIT classes=%d threshold_s=%.1f", cfg->n_classes, cfg->threshold_s);
     return true;
 }
 
@@ -250,17 +308,33 @@ static bool param_set(const char* name, const char* value) {
 char* config_to_json(const config_t* cfg) {
     json_t* o = json_object();
 
-    json_t* types = json_array();
-    for (int i = 0; i < cfg->n_types; i++) {
-        json_array_append_new(types, json_string(cfg->types[i]));
+    json_t* classes = json_array();
+    for (int i = 0; i < cfg->n_classes; i++) {
+        const class_cfg_t* c    = &cfg->classes[i];
+        json_t*            item = json_object();
+        json_object_set_new(item, "class", json_string(c->cls));
+        json_object_set_new(item, "name", json_string(c->name));
+        json_object_set_new(item, "enabled", json_boolean(c->enabled));
+        /* null means "inherit the global floor" — distinct from an explicit 0. */
+        if (c->min_score >= 0.0) {
+            json_object_set_new(item, "minScore", json_real(c->min_score));
+        } else {
+            json_object_set_new(item, "minScore", json_null());
+        }
+        json_array_append_new(classes, item);
     }
-    json_object_set_new(o, "objectTypes", types);
+    json_object_set_new(o, "classes", classes);
 
-    json_t* available = json_array();
-    for (size_t i = 0; i < G_N_ELEMENTS(KNOWN_CLASSES); i++) {
-        json_array_append_new(available, json_string(KNOWN_CLASSES[i]));
-    }
-    json_object_set_new(o, "availableTypes", available);
+    /* Shown as permanently excluded, with the reason, rather than silently
+     * missing from the list. */
+    json_t* excluded = json_array();
+    json_array_append_new(excluded, json_string("Head"));
+    json_array_append_new(excluded, json_string("LicensePlate"));
+    json_object_set_new(o, "excludedClasses", excluded);
+    json_object_set_new(o,
+                        "excludedReason",
+                        json_string("attribute of a parent object — timing it would count the "
+                                    "same object twice"));
 
     json_object_set_new(o, "minScore", json_real(cfg->min_score));
     json_object_set_new(o, "fallbackToVehicle", json_boolean(cfg->fallback_to_vehicle));
@@ -308,6 +382,91 @@ static char* stage_double(json_t* root,
     return NULL;
 }
 
+/** Validate the classes array and stage the three parameters it maps onto. */
+static char* stage_classes(json_t* root, GHashTable* staged) {
+    json_t* classes = json_object_get(root, "classes");
+    if (!classes) {
+        return NULL;
+    }
+    if (!json_is_array(classes) || json_array_size(classes) == 0) {
+        return g_strdup("classes must be a non-empty array");
+    }
+
+    GString* enabled = g_string_new(NULL);
+    GString* names   = g_string_new(NULL);
+    GString* scores  = g_string_new(NULL);
+    char*    error   = NULL;
+    int      n_on    = 0;
+
+    size_t  idx;
+    json_t* item;
+    json_array_foreach(classes, idx, item) {
+        const char* cls = json_string_value(json_object_get(item, "class"));
+        if (!cls) {
+            error = g_strdup("each class entry needs a \"class\"");
+            break;
+        }
+        if (tracker_is_attribute_class(cls)) {
+            error = g_strdup_printf(
+                "%s is an attribute of another object, not an object that can dwell", cls);
+            break;
+        }
+        if (!config_is_known_class(cls)) {
+            error = g_strdup_printf("unknown object class: %s", cls);
+            break;
+        }
+
+        json_t* en = json_object_get(item, "enabled");
+        if (en && json_is_true(en)) {
+            g_string_append_printf(enabled, "%s%s", enabled->len ? "," : "", cls);
+            n_on++;
+        }
+
+        const char* label = json_string_value(json_object_get(item, "name"));
+        if (label) {
+            /* Semicolons and equals signs are the encoding's delimiters. */
+            if (strchr(label, ';') || strchr(label, '=')) {
+                error = g_strdup_printf("name for %s cannot contain ';' or '='", cls);
+                break;
+            }
+            if (!*label) {
+                error = g_strdup_printf("name for %s cannot be empty", cls);
+                break;
+            }
+            g_string_append_printf(names, "%s%s=%s", names->len ? ";" : "", cls, label);
+        }
+
+        json_t* ms = json_object_get(item, "minScore");
+        if (ms && !json_is_null(ms)) {
+            if (!json_is_number(ms)) {
+                error = g_strdup_printf("minScore for %s must be a number or null", cls);
+                break;
+            }
+            const double v = json_number_value(ms);
+            if (v < 0.0 || v > 1.0) {
+                error = g_strdup_printf("minScore for %s must be between 0 and 1", cls);
+                break;
+            }
+            g_string_append_printf(scores, "%s%s=%.4f", scores->len ? ";" : "", cls, v);
+        }
+    }
+
+    if (!error && n_on == 0) {
+        error = g_strdup("at least one class must be enabled, or nothing will ever be timed");
+    }
+
+    if (!error) {
+        g_hash_table_replace(staged, g_strdup("ObjectTypes"), g_strdup(enabled->str));
+        g_hash_table_replace(staged, g_strdup("ObjectTypeNames"), g_strdup(names->str));
+        g_hash_table_replace(staged, g_strdup("ClassMinScores"), g_strdup(scores->str));
+    }
+
+    g_string_free(enabled, TRUE);
+    g_string_free(names, TRUE);
+    g_string_free(scores, TRUE);
+    return error;
+}
+
 char* config_apply_json(const char* json) {
     if (!handle) {
         return g_strdup("parameter backend unavailable");
@@ -326,43 +485,7 @@ char* config_apply_json(const char* json) {
     /* Validate everything before writing anything, so a rejected field cannot
      * leave the configuration half-applied. */
     GHashTable* staged = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
-    char*       error  = NULL;
-
-    json_t* types = json_object_get(root, "objectTypes");
-    if (types) {
-        if (!json_is_array(types) || json_array_size(types) == 0) {
-            error = g_strdup("objectTypes must be a non-empty array");
-        } else {
-            GString* csv = g_string_new(NULL);
-            size_t   idx;
-            json_t*  item;
-            json_array_foreach(types, idx, item) {
-                const char* name = json_string_value(item);
-                if (!name) {
-                    g_free(error);
-                    error = g_strdup("objectTypes must contain strings");
-                    break;
-                }
-                if (tracker_is_attribute_class(name)) {
-                    g_free(error);
-                    error = g_strdup_printf(
-                        "%s is an attribute of another object, not an object that can dwell",
-                        name);
-                    break;
-                }
-                if (!config_is_known_class(name)) {
-                    g_free(error);
-                    error = g_strdup_printf("unknown object type: %s", name);
-                    break;
-                }
-                g_string_append_printf(csv, "%s%s", csv->len ? "," : "", name);
-            }
-            if (!error) {
-                g_hash_table_replace(staged, g_strdup("ObjectTypes"), g_strdup(csv->str));
-            }
-            g_string_free(csv, TRUE);
-        }
-    }
+    char*       error  = stage_classes(root, staged);
 
     json_t* ref = json_object_get(root, "referencePoint");
     if (!error && ref) {

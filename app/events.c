@@ -104,6 +104,10 @@ static AXEventKeyValueSet* build_declaration(event_kind_t kind, int zone_id) {
                                          AX_VALUE_TYPE_STRING, &err);
     ax_event_key_value_set_add_key_value(set, "objectType", NULL, empty,
                                          AX_VALUE_TYPE_STRING, &err);
+    ax_event_key_value_set_add_key_value(set, "objectClass", NULL, empty,
+                                         AX_VALUE_TYPE_STRING, &err);
+    ax_event_key_value_set_add_key_value(set, "zoneName", NULL, empty,
+                                         AX_VALUE_TYPE_STRING, &err);
     ax_event_key_value_set_add_key_value(set, "state", NULL, empty,
                                          AX_VALUE_TYPE_STRING, &err);
     ax_event_key_value_set_add_key_value(set, "elapsedSeconds", NULL, &zero_d,
@@ -122,6 +126,8 @@ static AXEventKeyValueSet* build_declaration(event_kind_t kind, int zone_id) {
      * than being treated as part of the event's identity. */
     static const char* const data_keys[] = {"objectId",
                                             "objectType",
+                                            "objectClass",
+                                            "zoneName",
                                             "state",
                                             "elapsedSeconds",
                                             "thresholdExceeded",
@@ -256,6 +262,10 @@ void events_emit(const dwell_event_t* ev, void* user) {
     ax_event_key_value_set_add_key_value(set, "objectId", NULL, ev->object_id,
                                          AX_VALUE_TYPE_STRING, &err);
     ax_event_key_value_set_add_key_value(set, "objectType", NULL, ev->object_type,
+                                         AX_VALUE_TYPE_STRING, &err);
+    ax_event_key_value_set_add_key_value(set, "objectClass", NULL, ev->object_class,
+                                         AX_VALUE_TYPE_STRING, &err);
+    ax_event_key_value_set_add_key_value(set, "zoneName", NULL, ev->zone_name,
                                          AX_VALUE_TYPE_STRING, &err);
     ax_event_key_value_set_add_key_value(set, "state", NULL, ev->state,
                                          AX_VALUE_TYPE_STRING, &err);

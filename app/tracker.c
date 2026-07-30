@@ -75,6 +75,19 @@ static bool is_vehicle_class(const char* cls) {
            strcmp(cls, "VehicleOther") == 0 || strcmp(cls, "Vehicle") == 0;
 }
 
+/** A zone with no class list of its own inherits whatever is enabled globally. */
+static bool class_allowed_in_zone(const zone_t* z, const char* cls) {
+    if (z->n_classes == 0) {
+        return true;
+    }
+    for (int i = 0; i < z->n_classes; i++) {
+        if (strcmp(z->classes[i], cls) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /**
  * Eligibility is evaluated against the track's best-ever class, not the class
  * on the current frame, so a momentary flicker to unclassified does not drop a
@@ -83,34 +96,50 @@ static bool is_vehicle_class(const char* cls) {
  * A track that is not yet eligible still records first_inside_us, so when a
  * late classification arrives the entry time is backdated automatically and no
  * early dwell is lost (EC-5).
+ *
+ * Evaluated per zone: a loading bay may time only trucks while a doorway times
+ * only people.
  */
-static bool class_eligible(const config_t* cfg, const char* cls, double score) {
+static bool class_eligible(const config_t* cfg, const zone_t* z, const char* cls, double score) {
     if (cls[0] == '\0') {
         return false; /* never classified yet */
     }
     if (tracker_is_attribute_class(cls)) {
         return false;
     }
-    if (score < cfg->min_score) {
+
+    const class_cfg_t* c         = config_find_class(cfg, cls);
+    const char*        effective = cls;
+
+    /* FR-2: an undetermined or unselected vehicle sub-type still counts when
+     * the generic Vehicle class is enabled. */
+    if ((!c || !c->enabled) && cfg->fallback_to_vehicle && is_vehicle_class(cls)) {
+        const class_cfg_t* generic = config_find_class(cfg, "Vehicle");
+        if (generic && generic->enabled) {
+            c         = generic;
+            effective = "Vehicle";
+        }
+    }
+
+    if (!c || !c->enabled) {
         return false;
     }
 
-    for (int i = 0; i < cfg->n_types; i++) {
-        if (strcmp(cfg->types[i], cls) == 0) {
-            return true;
-        }
+    /* A class may set its own confidence floor; otherwise the global one. */
+    const double floor = (c->min_score >= 0.0) ? c->min_score : cfg->min_score;
+    if (score < floor) {
+        return false;
     }
 
-    /* FR-2: an undetermined or unselected vehicle sub-type still counts when
-     * the generic Vehicle type is selected. */
-    if (cfg->fallback_to_vehicle && is_vehicle_class(cls)) {
-        for (int i = 0; i < cfg->n_types; i++) {
-            if (strcmp(cfg->types[i], "Vehicle") == 0) {
-                return true;
-            }
-        }
-    }
-    return false;
+    /* Accept either the raw class or what it folded into, so a zone listing
+     * "Vehicle" still catches an unselected Truck under the fallback. */
+    return class_allowed_in_zone(z, cls) || class_allowed_in_zone(z, effective);
+}
+
+/** Zones may override the dwell threshold; 0 or less means inherit. */
+static double zone_threshold(const tracker_t* t, int zone_idx) {
+    const double z = t->zones.zones[zone_idx].threshold_s;
+    return (z > 0.0) ? z : t->cfg.threshold_s;
 }
 
 static void emit(tracker_t* t,
@@ -129,9 +158,17 @@ static void emit(tracker_t* t,
     memset(&ev, 0, sizeof(ev));
     ev.kind = kind;
     g_strlcpy(ev.object_id, tr->id, sizeof(ev.object_id));
+
+    /* objectType is the operator-facing name; objectClass keeps the raw class
+     * the camera reported, so a VMS rule can match on either. */
     g_strlcpy(ev.object_type,
-              tr->best_class[0] ? tr->best_class : "Unknown",
+              config_display_name(&t->cfg, tr->best_class),
               sizeof(ev.object_type));
+    g_strlcpy(ev.object_class,
+              tr->best_class[0] ? tr->best_class : "Unknown",
+              sizeof(ev.object_class));
+
+    g_strlcpy(ev.zone_name, t->zones.zones[zone_idx].name, sizeof(ev.zone_name));
     ev.zone_id            = t->zones.zones[zone_idx].id;
     ev.state              = state;
     ev.elapsed_s          = elapsed_s;
@@ -153,9 +190,9 @@ static double elapsed_of(const tracker_t* t, const zstate_t* zs) {
     return d > 0 ? secs(d) : 0.0;
 }
 
-static double overage_of(const tracker_t* t, const zstate_t* zs) {
+static double overage_of(const tracker_t* t, const zstate_t* zs, int zone_idx) {
     const double e = elapsed_of(t, zs);
-    const double o = e - t->cfg.threshold_s;
+    const double o = e - zone_threshold(t, zone_idx);
     return o > 0.0 ? o : 0.0;
 }
 
@@ -342,7 +379,8 @@ static void force_exit(tracker_t* t, track_t* tr, const char* reason) {
         const int64_t end_us  = zs->last_inside_us > zs->entry_us ? zs->last_inside_us : t->now_us;
         const int64_t total   = end_us - zs->entry_us;
         const double  elapsed = total > 0 ? secs(total) : 0.0;
-        const double  over    = elapsed > t->cfg.threshold_s ? elapsed - t->cfg.threshold_s : 0.0;
+        const double  thr     = zone_threshold(t, zi);
+        const double  over    = elapsed > thr ? elapsed - thr : 0.0;
 
         syslog(LOG_INFO,
                "DWELL_EXIT id=%s zone=%d total_s=%.3f reason=%s",
@@ -386,10 +424,10 @@ void tracker_end_frame(tracker_t* t) {
             continue;
         }
 
-        const bool eligible = class_eligible(&t->cfg, tr->best_class, tr->best_score);
-
         for (int zi = 0; zi < t->zones.n_zones; zi++) {
-            zstate_t* zs = &tr->z[zi];
+            zstate_t*  zs = &tr->z[zi];
+            const bool eligible =
+                class_eligible(&t->cfg, &t->zones.zones[zi], tr->best_class, tr->best_score);
 
             /* Re-evaluate while the state keeps changing, so a transition and
              * the condition it immediately satisfies both resolve within one
@@ -437,15 +475,15 @@ void tracker_end_frame(tracker_t* t) {
 
                 const double e = elapsed_of(t, zs);
 
-                if (!zs->threshold_fired && t->cfg.threshold_s > 0.0 &&
-                    e >= t->cfg.threshold_s) {
+                const double thr = zone_threshold(t, zi);
+                if (!zs->threshold_fired && thr > 0.0 && e >= thr) {
                     zs->threshold_fired = true;
                     syslog(LOG_INFO,
                            "DWELL_THRESHOLD id=%s zone=%d elapsed_s=%.3f",
                            tr->id,
                            t->zones.zones[zi].id,
                            e);
-                    emit(t, tr, zi, "threshold", "in", e, true, overage_of(t, zs));
+                    emit(t, tr, zi, "threshold", "in", e, true, overage_of(t, zs, zi));
                 }
 
                 if (t->cfg.update_interval_s > 0.0 &&
@@ -453,7 +491,7 @@ void tracker_end_frame(tracker_t* t) {
                         (int64_t)(t->cfg.update_interval_s * 1e6)) {
                     zs->last_update_us = t->now_us;
                     emit(t, tr, zi, "update", "in", e, zs->threshold_fired,
-                         overage_of(t, zs));
+                         overage_of(t, zs, zi));
                 }
                 break;
             }
@@ -469,8 +507,8 @@ void tracker_end_frame(tracker_t* t) {
                      * would otherwise short-circuit the debounce entirely. */
                     const int64_t total = zs->last_inside_us - zs->entry_us;
                     const double  e     = total > 0 ? secs(total) : 0.0;
-                    const double  over =
-                        e > t->cfg.threshold_s ? e - t->cfg.threshold_s : 0.0;
+                    const double thr  = zone_threshold(t, zi);
+                    const double over = e > thr ? e - thr : 0.0;
 
                     syslog(LOG_INFO,
                            "DWELL_EXIT id=%s zone=%d total_s=%.3f reason=left-zone",
@@ -546,13 +584,20 @@ char* tracker_status_json(tracker_t* t) {
             json_object_set_new(o, "objectId", json_string(tr->id));
             json_object_set_new(o,
                                 "objectType",
+                                json_string(config_display_name(&t->cfg, tr->best_class)));
+            json_object_set_new(o,
+                                "objectClass",
                                 json_string(tr->best_class[0] ? tr->best_class : "Unknown"));
             json_object_set_new(o, "score", json_real(tr->best_score));
             json_object_set_new(o, "zoneId", json_integer(t->zones.zones[zi].id));
             json_object_set_new(o, "zoneName", json_string(t->zones.zones[zi].name));
             json_object_set_new(o, "elapsedSeconds", json_real(e));
             json_object_set_new(o, "thresholdExceeded", json_boolean(zs->threshold_fired));
-            json_object_set_new(o, "overageSeconds", json_real(overage_of(t, zs)));
+            json_object_set_new(o, "overageSeconds", json_real(overage_of(t, zs, zi)));
+            /* Normalized reference point, so the page can put a timer badge on
+             * the object in the live view. */
+            json_object_set_new(o, "x", json_real(tr->last_ref.x));
+            json_object_set_new(o, "y", json_real(tr->last_ref.y));
             json_object_set_new(o, "leaving", json_boolean(zs->state == DW_PENDING_OUT));
             json_object_set_new(o, "present", json_boolean(tr->seen_this_frame));
             json_object_set_new(o, "stationary", json_boolean(tr->stationary));
@@ -586,7 +631,7 @@ int tracker_labels(tracker_t* t, dwell_label_t* out, int max) {
 
             const double e     = elapsed_of(t, zs);
             const int    total = (int)e;
-            const double over  = overage_of(t, zs);
+            const double over  = overage_of(t, zs, zi);
 
             out[n].x    = tr->last_ref.x;
             out[n].y    = tr->last_ref.y;
@@ -596,7 +641,7 @@ int tracker_labels(tracker_t* t, dwell_label_t* out, int max) {
                 g_snprintf(out[n].text,
                            sizeof(out[n].text),
                            "%s %d:%02d  +%d:%02d",
-                           tr->best_class[0] ? tr->best_class : "Object",
+                           config_display_name(&t->cfg, tr->best_class),
                            total / 60,
                            total % 60,
                            (int)over / 60,
@@ -605,7 +650,7 @@ int tracker_labels(tracker_t* t, dwell_label_t* out, int max) {
                 g_snprintf(out[n].text,
                            sizeof(out[n].text),
                            "%s %d:%02d",
-                           tr->best_class[0] ? tr->best_class : "Object",
+                           config_display_name(&t->cfg, tr->best_class),
                            total / 60,
                            total % 60);
             }

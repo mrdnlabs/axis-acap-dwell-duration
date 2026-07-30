@@ -414,6 +414,39 @@ event-paced, not video-paced. No Larod/DLPU use by this app at all.
 
 ---
 
+## The stationary heuristic misfires on people, and delays their exit event
+
+First run with real objects being timed (2026-07-30, threshold 30 s, stationary hold 300 s):
+
+```
+DWELL_EXIT id=2ec4386b… zone=2 total_s=4.000 reason=stationary-hold-expired
+DWELL_EXIT id=cd74806c… zone=2 total_s=6.500 reason=stationary-hold-expired
+```
+
+A person who pauses for a few seconds is classified **stationary** — the check is "reference point
+moved less than `stationary_eps` over `stationary_window_s`", and standing still while talking
+satisfies it. When their track then ends, the **300 s stationary hold** applies instead of the short
+occlusion budget.
+
+The dwell total is right (4.0 s), but the `Exited` event carrying it arrives **five minutes late**.
+For a VMS consuming exits, that is a real problem: the "how long did it stay" record shows up long
+after the object has gone.
+
+Worth noting the design is doing exactly what it was told — the long hold exists so a *parked
+vehicle* keeps accruing while the tracker loses it (FR-5). The flaw is applying the same budget to
+anything that merely paused.
+
+Candidate fixes, none yet implemented:
+
+- Scale the hold by class — a long hold for vehicles, a short one for people.
+- Require a longer stationary run before granting the long budget (a person pausing for 3 s is not
+  a parked truck).
+- End the hold early when the object is confidently gone — e.g. the zone has been empty of any
+  detection for some multiple of the frame interval.
+
+Until then, set `stationaryHold` low if exit latency matters more than surviving a dropped track on
+a parked object.
+
 ## Still open — needs objects in the scene
 
 The camera views an indoor office. Two things still cannot be measured from this scene:

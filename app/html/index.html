@@ -7,194 +7,241 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="wrap">
+
 <header>
-    <div class="title">
+    <div class="brand">
         <h1>Object Dwell Timer</h1>
-        <span class="ver">v0.1.0</span>
+        <span class="ver">0.1.0</span>
     </div>
     <div class="live">
-        <span id="dot" class="dot"></span>
-        <span id="liveText">connecting&hellip;</span>
+        <span class="live-state"><span id="dot" class="dot"></span><span id="liveText">connecting&hellip;</span></span>
+        <span id="stamp">&mdash;</span>
     </div>
 </header>
 
-<p class="lede">
-    Times how long selected object types stay inside a zone, and reports enter, exit, threshold
-    and dwell events to the camera event system and MQTT.
-</p>
-
-<section class="panel">
-    <h2>In zone now <span class="hint">elapsed counts up live; overage is time past the threshold</span></h2>
-    <table id="objectsTable">
-        <thead>
-            <tr><th>Object</th><th>Type</th><th>Zone</th><th>Elapsed</th><th>Overage</th><th>State</th></tr>
-        </thead>
-        <tbody><tr class="empty-row"><td colspan="6">nothing in zone</td></tr></tbody>
-    </table>
-</section>
-
-<section class="panel">
-    <h2>Zones <span class="hint">click the image to add points, drag to move, right-click a point to remove</span></h2>
-
-    <div class="zone-tabs" id="zoneTabs"></div>
-
-    <div class="editor" id="editor">
-        <img id="snapshot" alt="Camera view" src="/axis-cgi/jpg/image.cgi?resolution=1280x720">
-        <canvas id="canvas"></canvas>
-    </div>
-
-    <div class="buttons">
-        <button type="button" id="addZone">Add zone</button>
-        <button type="button" id="deleteZone">Delete zone</button>
-        <button type="button" id="clearPoints">Clear points</button>
-        <button type="button" id="refreshSnap">Refresh image</button>
-        <button type="button" id="saveZones" class="primary">Save zones</button>
-    </div>
-    <p class="result" id="zoneResult"></p>
-    <p class="note">
-        Saving zones closes any dwell in progress with a normal exit event first &mdash; the
-        polygons those timers were measured against are about to change.
-    </p>
-</section>
-
-<section class="panel">
-    <h2>Settings <span class="hint">applied immediately, no restart</span></h2>
-
-    <form id="settingsForm" autocomplete="off">
-        <fieldset>
-            <legend>Object types to time</legend>
-            <div id="typeChecks" class="checks"></div>
-            <p class="note">
-                <code>Head</code> and <code>LicensePlate</code> are never offered. They are
-                attributes of a parent object and carry their own track id, so counting them would
-                time the same object twice.
-            </p>
-        </fieldset>
-
-        <div class="grid">
-            <label>Minimum confidence
-                <input type="number" name="minScore" min="0" max="1" step="0.05">
-                <small>0&ndash;1. Detections below this are ignored.</small>
-            </label>
-            <label>Reference point
-                <select name="referencePoint">
-                    <option value="bottomCenter">Bottom centre (footprint)</option>
-                    <option value="centroid">Centroid</option>
-                </select>
-                <small>Which point of the box is tested against the polygon.</small>
-            </label>
-            <label>Dwell threshold (s)
-                <input type="number" name="dwellThreshold" min="0" max="86400" step="1">
-                <small>Crossing this fires an event; overage is reported afterwards.</small>
-            </label>
-            <label>Dwell update interval (s)
-                <input type="number" name="updateInterval" min="0" max="3600" step="1">
-                <small>0 disables periodic updates.</small>
-            </label>
-            <label>Enter debounce (s)
-                <input type="number" name="enterDebounce" min="0" max="60" step="0.1">
-                <small>Suppresses objects that only clip the zone.</small>
-            </label>
-            <label>Exit debounce (s)
-                <input type="number" name="exitDebounce" min="0" max="300" step="0.1">
-                <small>Measured from the first sighting outside.</small>
-            </label>
-            <label>Occlusion gap budget (s)
-                <input type="number" name="occlusionMaxGap" min="0" max="3600" step="1">
-                <small>Only starts once the camera ends the track. Absence alone never exits.</small>
-            </label>
-            <label>Stationary hold (s)
-                <input type="number" name="stationaryHold" min="0" max="86400" step="1">
-                <small>Longer budget for an object that was still when its track ended.</small>
-            </label>
-        </div>
-
-        <label class="inline">
-            <input type="checkbox" name="fallbackToVehicle">
-            Count an undetermined vehicle sub-type as <code>Vehicle</code>
-        </label>
-
-        <label class="inline">
-            <input type="checkbox" name="overlayEnabled">
-            Draw zones and elapsed times on the video stream
-        </label>
-
-        <label class="inline">
-            <input type="checkbox" name="mqttAutoConfigure">
-            Keep the device MQTT bridge configured to publish these events
-        </label>
-
-        <div class="buttons">
-            <button type="submit" class="primary">Save settings</button>
-            <button type="button" id="reloadSettings">Discard changes</button>
-        </div>
-        <p class="result" id="settingsResult"></p>
-    </form>
-</section>
-
-<div class="two-col">
+<div class="live-row">
     <section class="panel">
-        <h2>Test events <span class="hint">flagged test=true</span></h2>
-        <p class="note">
-            Wire and prove a VMS rule with nothing in the scene. Each travels the same path a
-            genuine dwell event takes.
-        </p>
-        <div class="buttons">
-            <button type="button" data-kind="entered">Test Enter</button>
-            <button type="button" data-kind="exited">Test Exit</button>
-            <button type="button" data-kind="threshold">Test Threshold</button>
+        <div class="viewer" id="viewer">
+            <img id="snapshot" alt="Camera view" src="/axis-cgi/jpg/image.cgi?resolution=1280x720">
+            <canvas id="canvas"></canvas>
+            <div class="legend" id="legend"></div>
+            <div id="badges"></div>
         </div>
-        <p class="result" id="testResult"></p>
+        <div class="viewer-bar">
+            <div class="zone-tabs" id="zoneTabs"></div>
+            <div class="btn-row">
+                <button type="button" id="refreshSnap">Refresh image</button>
+                <button type="button" id="saveZones" class="primary">Save zones</button>
+            </div>
+        </div>
+        <div class="editor-hint">
+            Click to add a point &middot; drag to move &middot; right-click to remove
+            <span id="zoneResult" class="result"></span>
+        </div>
     </section>
 
-    <section class="panel">
-        <h2>Health <span class="hint">running is not the same as working</span></h2>
-        <dl id="health" class="counters"></dl>
-    </section>
+    <div>
+        <section class="panel">
+            <div class="panel-body">
+                <div class="verdict" id="verdict">
+                    <div class="verdict-icon" id="verdictIcon">&hellip;</div>
+                    <div style="min-width:0">
+                        <div class="verdict-title" id="verdictTitle">Checking</div>
+                        <div class="verdict-text" id="verdictText">Contacting the application&hellip;</div>
+                    </div>
+                </div>
+                <div class="tiles">
+                    <div class="tile"><b id="tileInZone">&mdash;</b><span>In zone</span></div>
+                    <div class="tile"><b id="tileEvents">&mdash;</b><span>Events</span></div>
+                    <div class="tile"><b id="tileDetections">&mdash;</b><span>Detections</span></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-head">
+                <h2>In zone now</h2>
+                <span class="sum-sub" id="thresholdNote"></span>
+            </div>
+            <div id="objects"></div>
+        </section>
+    </div>
 </div>
 
 <section class="panel">
-    <h2>MQTT <span class="hint">the hand-off surface for a VMS</span></h2>
-
-    <p class="mqtt-status" id="mqttStatus">checking&hellip;</p>
-
-    <div class="buttons">
-        <button type="button" id="mqttEnable" class="primary">Configure MQTT bridge</button>
-        <button type="button" id="mqttDisable">Remove our filters</button>
+    <div class="panel-head">
+        <h2>Zones
+            <span class="hint">friendly names appear here, on the overlay and in the VMS &mdash; the MQTT topic keeps the numeric id</span>
+        </h2>
+        <div class="btn-row">
+            <button type="button" id="addZone">+ Add zone</button>
+            <button type="button" id="deleteZone">Delete selected</button>
+        </div>
     </div>
-    <p class="result" id="mqttResult"></p>
-
-    <p class="note">
-        The application never stores broker credentials &mdash; it asks the device's own MQTT
-        client to publish its events. Writes preserve every filter the operator already had.
-    </p>
-
-    <h3 class="sub">Subscribe to everything this app publishes</h3>
-    <div class="copyrow"><code id="mqttWildcard">&mdash;</code><button type="button" class="copy" data-copy="mqttWildcard">Copy</button></div>
-
-    <h3 class="sub">Per-event topics <span class="hint">zone is in the path, so a VMS can subscribe to one zone</span></h3>
-    <div id="mqttTopics" class="topiclist"></div>
-
-    <h3 class="sub">Sample payload</h3>
-    <div class="copyrow"><code id="mqttSample" class="wrap">&mdash;</code><button type="button" class="copy" data-copy="mqttSample">Copy</button></div>
-    <p class="note">
-        The bridge stringifies every value &mdash; booleans arrive as <code>"1"</code>/<code>"0"</code>
-        and numbers as <code>"112.000000"</code>. Its own <code>timestamp</code> is epoch
-        milliseconds; <code>utcTime</code> carries ISO-8601 UTC from the camera's NTP-synced clock.
-    </p>
+    <div class="grid-table zones-table">
+        <div class="grid-head">
+            <span></span><span>Friendly name</span><span>Classes that start the timer</span>
+            <span>Threshold</span><span class="num">Points</span><span>Timing</span>
+        </div>
+        <div id="zoneRows"></div>
+    </div>
 </section>
 
 <section class="panel">
-    <h2>Object classes seen <span class="hint">what this camera actually emits</span></h2>
-    <div id="classes" class="chips"><span class="empty">waiting for detections&hellip;</span></div>
-    <p class="note" id="classNote"></p>
+    <div class="panel-head">
+        <h2>Object classes
+            <span class="hint">tick a class to start timing it, and give it a name your operators will recognise</span>
+        </h2>
+        <div class="btn-row">
+            <button type="button" id="discardClasses" class="subtle">Discard</button>
+            <button type="button" id="saveClasses" class="primary">Save classes</button>
+        </div>
+    </div>
+    <div class="grid-table classes-table">
+        <div class="grid-head">
+            <span>Time</span><span>Class from the camera</span><span>Friendly name</span>
+            <span>Min confidence</span><span class="num">Seen</span>
+        </div>
+        <div id="classRows"></div>
+    </div>
+    <div class="panel-body" style="border-top:1px solid var(--line-2)">
+        <p class="note" id="excludedNote"></p>
+        <label class="toggle-line" style="margin-top:12px">
+            <span class="switch"><input type="checkbox" id="fallbackToVehicle"><i></i></span>
+            <span>Count undetermined vehicles<span class="cell-sub">A vehicle with no sub-type counts as the generic vehicle class.</span></span>
+        </label>
+        <p class="result" id="classesResult"></p>
+    </div>
 </section>
 
+<section class="panel">
+    <div class="panel-head">
+        <h2>Timing rules <span class="hint">applied immediately, no restart</span></h2>
+        <div class="btn-row">
+            <button type="button" id="discardSettings" class="subtle">Discard</button>
+            <button type="button" id="saveSettings" class="primary">Save settings</button>
+        </div>
+    </div>
+    <div class="panel-body">
+        <form id="settingsForm" autocomplete="off">
+            <div class="fields">
+                <label class="field">Default dwell threshold (s)
+                    <input type="number" name="dwellThreshold" min="0" max="86400" step="1">
+                    <small>Zones may override it above.</small>
+                </label>
+                <label class="field">Reference point
+                    <select name="referencePoint">
+                        <option value="bottomCenter">Bottom centre</option>
+                        <option value="centroid">Centroid</option>
+                    </select>
+                    <small>Footprint, not centroid.</small>
+                </label>
+                <label class="field">Update interval (s)
+                    <input type="number" name="updateInterval" min="0" max="3600" step="1">
+                    <small>0 disables periodic updates.</small>
+                </label>
+                <label class="field">Default min confidence
+                    <input type="number" name="minScore" min="0" max="1" step="0.05">
+                    <small>Used by classes without their own floor.</small>
+                </label>
+                <label class="field">Enter debounce (s)
+                    <input type="number" name="enterDebounce" min="0" max="60" step="0.1">
+                    <small>Suppresses objects that only clip the zone.</small>
+                </label>
+                <label class="field">Exit debounce (s)
+                    <input type="number" name="exitDebounce" min="0" max="300" step="0.1">
+                    <small>From the first sighting outside.</small>
+                </label>
+                <label class="field">Occlusion gap budget (s)
+                    <input type="number" name="occlusionMaxGap" min="0" max="3600" step="1">
+                    <small>Starts only when the track ends.</small>
+                </label>
+                <label class="field">Stationary hold (s)
+                    <input type="number" name="stationaryHold" min="0" max="86400" step="1">
+                    <small>Longer budget for a still object.</small>
+                </label>
+            </div>
+            <div class="toggles">
+                <label class="toggle-line">
+                    <span class="switch"><input type="checkbox" name="overlayEnabled"><i></i></span>
+                    <span>Draw overlay on video</span>
+                </label>
+                <label class="toggle-line">
+                    <span class="switch"><input type="checkbox" name="mqttAutoConfigure"><i></i></span>
+                    <span>Keep MQTT bridge configured</span>
+                </label>
+            </div>
+            <p class="result" id="settingsResult"></p>
+        </form>
+    </div>
+</section>
+
+<details class="panel">
+    <summary>
+        <span class="sum-left">
+            <span class="caret">&#9656;</span>
+            <span class="sum-title">Event integration</span>
+            <span class="sum-sub">MQTT topics, sample payload, test triggers</span>
+        </span>
+        <span class="sum-right" id="mqttSummary">&mdash;</span>
+    </summary>
+    <div class="panel-body">
+        <p class="mqtt-status result" id="mqttStatus">checking&hellip;</p>
+        <div class="btn-row">
+            <button type="button" id="mqttEnable" class="primary">Configure MQTT bridge</button>
+            <button type="button" id="mqttDisable">Remove our filters</button>
+        </div>
+        <p class="result" id="mqttResult"></p>
+
+        <div class="copyrow" style="margin-top:12px">
+            <span class="label"><b>Subscribe to all</b></span>
+            <code id="mqttWildcard">&mdash;</code>
+            <button type="button" class="copy tiny" data-copy="mqttWildcard">Copy</button>
+        </div>
+        <div id="mqttTopics"></div>
+        <div class="copyrow">
+            <span class="label"><b>Sample payload</b></span>
+            <code id="mqttSample" class="wrap">&mdash;</code>
+            <button type="button" class="copy tiny" data-copy="mqttSample">Copy</button>
+        </div>
+
+        <div class="btn-row" style="margin-top:14px">
+            <span class="label" style="font-size:12px;font-weight:620">Send a test event</span>
+            <button type="button" data-kind="entered">Enter</button>
+            <button type="button" data-kind="exited">Exit</button>
+            <button type="button" data-kind="threshold">Threshold</button>
+        </div>
+        <p class="note">
+            Flagged <code style="padding:1px 5px;border-radius:4px;background:var(--line-3)">test=true</code>
+            &mdash; proves a VMS rule with an empty scene. The application never stores broker
+            credentials; writes preserve every filter the operator already had.
+        </p>
+        <p class="result" id="testResult"></p>
+    </div>
+</details>
+
+<details class="panel">
+    <summary>
+        <span class="sum-left">
+            <span class="caret">&#9656;</span>
+            <span class="sum-title">Diagnostics</span>
+            <span class="sum-sub">counters, classes seen, application log</span>
+        </span>
+        <span class="sum-right" id="diagSummary">&mdash;</span>
+    </summary>
+    <div class="panel-body">
+        <div class="kv" id="counters"></div>
+        <p class="note" id="classesSeenNote"></p>
+    </div>
+</details>
+
 <footer>
-    <span id="stamp">&mdash;</span>
-    <a href="/axis-cgi/admin/systemlog.cgi?appname=object_dwell_timer" target="_blank" rel="noopener">application log</a>
+    <span>Advisory only &mdash; not a safety interlock or evidentiary timing source.</span>
+    <a href="/axis-cgi/admin/systemlog.cgi?appname=object_dwell_timer" target="_blank" rel="noopener">Application log &#8599;</a>
 </footer>
 
+</div>
 <script src="app.js"></script>
 </body>
 </html>

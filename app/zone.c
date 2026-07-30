@@ -12,19 +12,40 @@
 #include <syslog.h>
 #include <unistd.h>
 
+/**
+ * The classes this application will ever time, with sensible operator-facing
+ * names. Head and LicensePlate are deliberately absent: they are attributes of
+ * a parent object and carry their own track id, so timing them would count one
+ * person or one car twice.
+ */
+static const struct {
+    const char* cls;
+    const char* name;
+} DEFAULT_CLASSES[] = {
+    {"Human", "Person"},
+    {"Vehicle", "Unknown vehicle"},
+    {"Car", "Car"},
+    {"Truck", "Truck"},
+    {"Bus", "Bus"},
+    {"Bike", "Bike"},
+    {"VehicleOther", "Other vehicle"},
+};
+
 void config_set_defaults(config_t* cfg) {
     memset(cfg, 0, sizeof(*cfg));
 
-    /* FR-2 specifies Truck as the shipped default. Until the Phase 2 config UI
-     * exists there is no way to change this on-device, so the build ships with
-     * every real object class enabled — otherwise the app is untestable on any
-     * scene without a truck in it. Narrow this to Truck when the UI lands. */
-    static const char* const initial_types[] =
-        {"Human", "Vehicle", "Car", "Truck", "Bus", "Bike", "VehicleOther"};
-    for (size_t i = 0; i < G_N_ELEMENTS(initial_types); i++) {
-        g_strlcpy(cfg->types[i], initial_types[i], CLASS_LEN);
+    /* Every real class ships enabled. FR-2 names Truck as the default type,
+     * but a Truck-only default makes the application look broken on any scene
+     * without a truck in it — and the classes are now editable, so narrowing
+     * is one click. */
+    for (size_t i = 0; i < G_N_ELEMENTS(DEFAULT_CLASSES); i++) {
+        class_cfg_t* c = &cfg->classes[i];
+        g_strlcpy(c->cls, DEFAULT_CLASSES[i].cls, CLASS_LEN);
+        g_strlcpy(c->name, DEFAULT_CLASSES[i].name, NAME_LEN);
+        c->enabled   = true;
+        c->min_score = -1.0; /* inherit the global default */
     }
-    cfg->n_types = (int)G_N_ELEMENTS(initial_types);
+    cfg->n_classes = (int)G_N_ELEMENTS(DEFAULT_CLASSES);
 
     cfg->min_score           = 0.30;
     cfg->fallback_to_vehicle = true;
@@ -47,6 +68,27 @@ void config_set_defaults(config_t* cfg) {
 
     cfg->mqtt_auto_configure = true;
     cfg->overlay_enabled     = false;
+}
+
+const class_cfg_t* config_find_class(const config_t* cfg, const char* cls) {
+    if (!cls || !*cls) {
+        return NULL;
+    }
+    for (int i = 0; i < cfg->n_classes; i++) {
+        if (strcmp(cfg->classes[i].cls, cls) == 0) {
+            return &cfg->classes[i];
+        }
+    }
+    return NULL;
+}
+
+const char* config_display_name(const config_t* cfg, const char* cls) {
+    const class_cfg_t* c = config_find_class(cfg, cls);
+    if (c && c->name[0]) {
+        return c->name;
+    }
+    /* An unconfigured or unclassified object still needs something readable. */
+    return (cls && *cls) ? cls : "Unknown";
 }
 
 void zone_set_defaults(zone_set_t* zs) {
@@ -120,6 +162,21 @@ char* zone_to_json(const zone_set_t* zs) {
             json_array_append_new(verts, pt);
         }
         json_object_set_new(o, "vertices", verts);
+
+        /* Emitted as null / empty rather than omitted, so the UI can tell
+         * "inherits the global setting" from "set to this value". */
+        if (z->threshold_s > 0.0) {
+            json_object_set_new(o, "dwellThreshold", json_real(z->threshold_s));
+        } else {
+            json_object_set_new(o, "dwellThreshold", json_null());
+        }
+
+        json_t* classes = json_array();
+        for (int c = 0; c < z->n_classes; c++) {
+            json_array_append_new(classes, json_string(z->classes[c]));
+        }
+        json_object_set_new(o, "classes", classes);
+
         json_array_append_new(arr, o);
     }
 
@@ -209,6 +266,41 @@ char* zone_parse_json(const char* text, zone_set_t* out) {
         }
         if (error) {
             break;
+        }
+
+        /* Per-zone threshold. Absent, null or <= 0 all mean "inherit". */
+        json_t* thr = json_object_get(o, "dwellThreshold");
+        if (json_is_number(thr)) {
+            const double v = json_number_value(thr);
+            if (v < 0.0 || v > 86400.0) {
+                error = g_strdup_printf("zone %zu: threshold must be between 0 and 86400 s",
+                                        idx + 1);
+                break;
+            }
+            z->threshold_s = v;
+        }
+
+        /* Per-zone class selection. An empty or absent array means "inherit
+         * whichever classes are enabled globally". */
+        json_t* classes = json_object_get(o, "classes");
+        if (json_is_array(classes)) {
+            size_t  ci;
+            json_t* item;
+            json_array_foreach(classes, ci, item) {
+                const char* name = json_string_value(item);
+                if (!name || !*name) {
+                    error = g_strdup_printf("zone %zu: classes must be strings", idx + 1);
+                    break;
+                }
+                if (z->n_classes >= MAX_CLASSES) {
+                    break;
+                }
+                g_strlcpy(z->classes[z->n_classes], name, CLASS_LEN);
+                z->n_classes++;
+            }
+            if (error) {
+                break;
+            }
         }
 
         parsed.n_zones++;

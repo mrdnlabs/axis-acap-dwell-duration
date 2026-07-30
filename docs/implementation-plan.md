@@ -331,6 +331,25 @@ threshold. GPU/CPU only, no DLPU. Doubles as the OQ-2 verification tool.
 | IF-2 topics | `mosquitto_sub -t '#'`, fire each test button, diff observed topic against the string the UI offers for copy. |
 | NFR-5 | Reboot and restart AOA; config and zones survive, subscription recovers. |
 
+## Design package applied (2026-07-30)
+
+The operator page was rebuilt from a UI design package: live view as the hero with zone polygons and
+timer badges, a plain-English verdict card and three tiles in place of eleven raw counters, editable
+zone and class tables, and MQTT/diagnostics folded into disclosures. Reimplemented in plain
+HTML/CSS/JS — the package ships React, which has no place on the device.
+
+Four backend capabilities came with it:
+
+1. **Class friendly names** — `ObjectTypeNames` (`Class=Name;…`) in AXParameter. Published as
+   `objectType`; the raw class moved to a new `objectClass` field so existing rules can be repointed.
+2. **Per-class minimum confidence** — `ClassMinScores`; falls back to the global floor.
+3. **Per-zone class selection** — `classes` in `zones.json`; empty means inherit the enabled set.
+4. **Per-zone threshold override** — `dwellThreshold` per zone; null means inherit.
+
+**[verified]** All four persist across restart, validate server-side (attribute classes, unknown
+classes, all-disabled, delimiter characters in names, out-of-range thresholds), and appear correctly
+in real MQTT events.
+
 ## Open items
 
 1. **Stationary track lifetime.** How long a still object keeps its track. Sets `stationaryHold`
