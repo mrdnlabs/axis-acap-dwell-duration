@@ -65,7 +65,10 @@ plural spelling silently does nothing.
 
 ### Install
 
-- `upload.cgi` multipart field is **`file`**, not `packfil`.
+- `upload.cgi` accepts either multipart field name — **both `file` and `packfil` work.** An earlier
+  note here claimed `packfil` was rejected; that was wrong. The `Error: 2` seen at the time was the
+  signature check, and the field name was changed in the same step, so the field got the blame.
+  Re-tested on AXIS OS 12.11.77 with `AllowUnsigned=true`: both return `OK`.
 - `Error: 2` from `upload.cgi` = signature verification failed. Unsigned apps are refused by
   default from AXIS OS 12.0 onward (was allowed up to 11.11). Enable with:
   `POST /axis-cgi/applications/config.cgi?action=set&name=AllowUnsigned&value=true`
